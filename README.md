@@ -26,6 +26,7 @@ La primera vez pide el nombre del profesional y una contraseña, y muestra la **
 ## Estructura
 
 ```text
+src/calculo/    motor de cálculo puro: catálogo de fórmulas de TMB y gasto semanal por MET
 src/main/       backend: sesión y cifrado, base de datos y migraciones, pacientes
 src/preload/    puente window.nutri (única puerta de la ventana al backend)
 src/renderer/   frontend React + Mantine
@@ -35,6 +36,6 @@ test/           pruebas
 
 ## Diferencias con Planv1
 
-- Una sola aplicación en vez de monorepo pnpm; el motor de cálculo irá en `src/calculo/`, sin dependencias de Electron.
+- Una sola aplicación en vez de monorepo pnpm; el motor de cálculo vive en `src/calculo/`, sin dependencias de Electron.
 - SQL directo con migraciones en `src/main/db.ts` (`PRAGMA user_version`) en vez de Drizzle.
 - `node:test` en vez de Vitest, y `@mantine/form` en vez de React Hook Form.
