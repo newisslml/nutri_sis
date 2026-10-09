@@ -83,8 +83,31 @@ const MIGRACIONES: (string | ((db: DB) => void))[] = [
        VALUES (@codigo, @categoria, @nombre, @met, @estimado, '${FUENTE_COMPENDIO}')`
     )
     for (const a of parsearCompendio(compendio)) insertar.run({ ...a, estimado: a.estimado ? 1 : 0 })
-  }
+  },
+  `ALTER TABLE control ADD COLUMN motivo TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN notas TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN tmb_manual REAL;
+   ALTER TABLE control ADD COLUMN edad_meses INTEGER; -- congelada a la fecha del control
+   ALTER TABLE auditoria ADD COLUMN profesional_id INTEGER REFERENCES profesional(id);`
 ]
+
+/** Registra en auditoría cada campo cuyo valor cambió, con quién y cuándo. */
+export function auditar(
+  db: DB,
+  tabla: string,
+  registroId: number,
+  profesionalId: number,
+  antes: Record<string, unknown>,
+  despues: Record<string, unknown>
+): void {
+  const texto = (v: unknown) => (v === null || v === undefined ? null : String(v))
+  const insertar = db.prepare(
+    'INSERT INTO auditoria (tabla, registro_id, profesional_id, campo, valor_anterior, valor_nuevo) VALUES (?, ?, ?, ?, ?, ?)'
+  )
+  for (const [campo, nuevo] of Object.entries(despues)) {
+    if (texto(antes[campo]) !== texto(nuevo)) insertar.run(tabla, registroId, profesionalId, campo, texto(antes[campo]), texto(nuevo))
+  }
+}
 
 /** Abre (o crea) la base con la clave. Lanza error si la clave no corresponde. */
 export function abrirBase(ruta: string, clave: Buffer): DB {

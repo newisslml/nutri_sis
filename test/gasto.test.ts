@@ -67,6 +67,7 @@ test('ETA, gestación y TMB manual', () => {
   const manual = calcularGastoSemanal({ ...base, modo: 'tmb', tmbManual: 1824 })
   assert.equal(manual.porDia[5], 2105) // 1824 / 24 × 27,7 = 76 × 27,7 = 2105,2
   assert.deepEqual(manual.formula, { id: 'manual', version: 1 })
+  assert.match(calcularGastoSemanal({ ...base, tmbManual: 1824 }).avisos.join(), /no cambia el gasto/)
 })
 
 test('niño: fuerza modo TMB con METy', () => {

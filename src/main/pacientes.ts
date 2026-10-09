@@ -1,5 +1,5 @@
 import type { Paciente, PacienteGuardar, PacienteResumen, Perfil } from '../shared/contratos'
-import type { DB } from './db'
+import { auditar, type DB } from './db'
 
 const SELECT = `SELECT id, rut, nombres, apellidos, fecha_nacimiento AS fechaNacimiento, sexo, perfil, disciplina,
   antecedentes, objetivo, tutor_nombre AS tutorNombre, consentimiento_fecha AS consentimientoFecha FROM paciente`
@@ -56,15 +56,9 @@ export function guardar(db: DB, p: PacienteGuardar, profesionalId: number): Paci
 
   const id = p.id
   const anterior = obtener(db, id)
-  const auditar = db.prepare(
-    `INSERT INTO auditoria (tabla, registro_id, campo, valor_anterior, valor_nuevo) VALUES ('paciente', ?, ?, ?, ?)`
-  )
   db.transaction(() => {
     db.prepare(`UPDATE paciente SET ${columnas} WHERE id = @id`).run({ ...campos, id })
-    for (const [campo, nuevo] of Object.entries(campos)) {
-      const viejo = anterior[campo as keyof typeof campos]
-      if (viejo !== nuevo) auditar.run(id, campo, viejo, nuevo)
-    }
+    auditar(db, 'paciente', id, profesionalId, anterior, campos)
   })()
   return obtener(db, id)
 }

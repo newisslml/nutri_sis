@@ -67,17 +67,26 @@ export const controlGuardar = z.object({
   metReposo: z.number().min(0.9).max(3),
   eta: z.boolean(),
   estado: z.enum(Object.keys(ADICIONAL) as [EstadoFisiologico, ...EstadoFisiologico[]]).nullable(),
+  tmbManual: z.number().min(300, 'TMB mínima 300 kcal').max(6000, 'TMB máxima 6000 kcal').nullable(),
+  motivo: z.string().trim(),
+  notas: z.string().trim(),
   semana: z.array(z.array(bloqueRutina)).length(7)
 })
 export type ControlGuardar = z.output<typeof controlGuardar>
-export type Control = Omit<ControlGuardar, 'pesoKg'> & { pesoKg: number | null; pacienteId: number; gasto: ResultadoGasto | null }
-export type ControlResumen = { id: number; fecha: string; pesoKg: number | null; promedioKcal: number | null }
+export type Control = Omit<ControlGuardar, 'pesoKg'> & {
+  pesoKg: number | null
+  pacienteId: number
+  edadMeses: number | null
+  gasto: ResultadoGasto | null
+}
+export type ControlResumen = Pick<Control, 'id' | 'fecha' | 'pesoKg' | 'tallaCm' | 'edadMeses' | 'motivo'> & { promedioKcal: number | null }
 
 /** Arma la entrada del motor igual en la pantalla (cálculo en vivo) y en el backend (cálculo que se guarda). */
 export function entradaGasto(c: ControlGuardar, p: Pick<Paciente, 'fechaNacimiento' | 'sexo'>): EntradaGasto {
   return {
     paciente: { pesoKg: c.pesoKg, tallaCm: c.tallaCm ?? undefined, edad: edadEnAnios(p.fechaNacimiento, c.fecha), sexo: p.sexo },
     formulaId: c.formulaId,
+    tmbManual: c.tmbManual ?? undefined,
     modo: c.modo,
     metReposo: c.metReposo,
     eta: c.eta,
@@ -101,6 +110,7 @@ export const entradas = {
   'controles.listar': z.object({ pacienteId: z.number().int().positive() }),
   'controles.crear': z.object({ pacienteId: z.number().int().positive() }),
   'controles.obtener': z.object({ id: z.number().int().positive() }),
+  'controles.descartar': z.object({ id: z.number().int().positive() }),
   'controles.guardar': controlGuardar
 }
 
@@ -116,6 +126,7 @@ export type Salidas = {
   'controles.listar': ControlResumen[]
   'controles.crear': { id: number }
   'controles.obtener': Control
+  'controles.descartar': null
   'controles.guardar': Control
 }
 

@@ -1,7 +1,7 @@
 import { calcularGastoSemanal } from '../calculo/gasto'
 import { entradaGasto, type ActividadMet, type Control, type ControlGuardar, type ControlResumen } from '../shared/contratos'
-import { edadEnAnios, hoyISO } from '../shared/validaciones'
-import type { DB } from './db'
+import { edadEnMeses, hoyISO } from '../shared/validaciones'
+import { auditar, type DB } from './db'
 
 export function actividades(db: DB): ActividadMet[] {
   return db
@@ -13,33 +13,73 @@ export function actividades(db: DB): ActividadMet[] {
 export function listar(db: DB, pacienteId: number): ControlResumen[] {
   return db
     .prepare(
-      `SELECT id, fecha, peso_kg AS pesoKg, json_extract(gasto, '$.promedio') AS promedioKcal
+      `SELECT id, fecha, peso_kg AS pesoKg, talla_cm AS tallaCm, edad_meses AS edadMeses, motivo,
+         json_extract(gasto, '$.promedio') AS promedioKcal
        FROM control WHERE paciente_id = ? ORDER BY fecha DESC, id DESC`
     )
     .all(pacienteId) as ControlResumen[]
 }
 
-/** Control nuevo con fecha de hoy. Mifflin-St Jeor para adultos, FAO/OMS/UNU (solo pide peso) para menores. */
+/**
+ * Control nuevo con fecha de hoy. Si hay uno anterior guardado, copia su rutina y sus parámetros para editar solo
+ * lo que cambió; la talla se copia solo en adultos (en niños se vuelve a medir). El peso siempre se mide de nuevo.
+ */
 export function crear(db: DB, pacienteId: number, profesionalId: number): number {
   const p = db.prepare('SELECT fecha_nacimiento AS f FROM paciente WHERE id = ?').get(pacienteId) as { f: string } | undefined
   if (!p) throw new Error('Paciente no encontrado')
   const fecha = hoyISO()
-  const formula = edadEnAnios(p.f, fecha) >= 19 ? 'mifflin-st-jeor' : 'fao-oms-unu-schofield'
-  // ponytail: MET de reposo 1,3 (sentado tranquilo, 07021) fijo; pasa a Configuración cuando el profesional lo defina.
-  const { lastInsertRowid } = db
+  const meses = edadEnMeses(p.f, fecha)
+  const anterior = db
     .prepare(
-      `INSERT INTO control (paciente_id, profesional_id, fecha, formula_id, modo_met, met_reposo)
-       VALUES (?, ?, ?, ?, 'estandar', 1.3)`
+      `SELECT id, talla_cm AS tallaCm, formula_id AS formulaId, modo_met AS modo, met_reposo AS metReposo, eta, estado_fisiologico AS estado
+       FROM control WHERE paciente_id = ? AND gasto IS NOT NULL ORDER BY fecha DESC, id DESC LIMIT 1`
     )
-    .run(pacienteId, profesionalId, fecha, formula)
-  return Number(lastInsertRowid)
+    .get(pacienteId) as
+    | { id: number; tallaCm: number | null; formulaId: string; modo: string; metReposo: number; eta: number; estado: string | null }
+    | undefined
+  // ponytail: sin control anterior, MET de reposo 1,3 (sentado tranquilo, 07021) fijo; pasa a Configuración cuando el profesional lo defina.
+  const base = anterior ?? {
+    tallaCm: null,
+    formulaId: meses >= 19 * 12 ? 'mifflin-st-jeor' : 'fao-oms-unu-schofield',
+    modo: 'estandar',
+    metReposo: 1.3,
+    eta: 0,
+    estado: null
+  }
+
+  return db.transaction(() => {
+    const id = Number(
+      db
+        .prepare(
+          `INSERT INTO control (paciente_id, profesional_id, fecha, edad_meses, talla_cm, formula_id, modo_met, met_reposo, eta, estado_fisiologico)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(pacienteId, profesionalId, fecha, meses, meses >= 18 * 12 ? base.tallaCm : null, base.formulaId, base.modo, base.metReposo, base.eta, base.estado)
+        .lastInsertRowid
+    )
+    if (anterior) {
+      db.prepare(
+        `INSERT INTO rutina_bloque (control_id, dia, actividad_id, nombre, met, minutos)
+         SELECT ?, dia, actividad_id, nombre, met, minutos FROM rutina_bloque WHERE control_id = ? ORDER BY id`
+      ).run(id, anterior.id)
+    }
+    return id
+  })()
+}
+
+/** Solo se descarta un control que nunca se guardó con cálculo: los registros clínicos no se borran. */
+export function descartar(db: DB, id: number): void {
+  if (db.prepare('DELETE FROM control WHERE id = ? AND gasto IS NULL').run(id).changes === 0) {
+    throw new Error('Solo se puede descartar un control que aún no se ha guardado')
+  }
 }
 
 export function obtener(db: DB, id: number): Control {
   const c = db
     .prepare(
-      `SELECT id, paciente_id AS pacienteId, fecha, peso_kg AS pesoKg, talla_cm AS tallaCm, formula_id AS formulaId,
-         modo_met AS modo, met_reposo AS metReposo, eta, estado_fisiologico AS estado, gasto
+      `SELECT id, paciente_id AS pacienteId, fecha, edad_meses AS edadMeses, peso_kg AS pesoKg, talla_cm AS tallaCm,
+         formula_id AS formulaId, tmb_manual AS tmbManual, modo_met AS modo, met_reposo AS metReposo, eta,
+         estado_fisiologico AS estado, motivo, notas, gasto
        FROM control WHERE id = ?`
     )
     .get(id) as (Omit<Control, 'eta' | 'gasto' | 'semana'> & { eta: number; gasto: string | null }) | undefined
@@ -52,8 +92,11 @@ export function obtener(db: DB, id: number): Control {
   return { ...c, eta: c.eta === 1, gasto: c.gasto ? JSON.parse(c.gasto) : null, semana }
 }
 
-/** Recalcula con el motor y congela el resultado junto con los MET usados. */
-export function guardar(db: DB, c: ControlGuardar): Control {
+/**
+ * Recalcula con el motor y congela el resultado junto con los MET usados y la edad a la fecha del control.
+ * Si el control ya tenía un cálculo guardado, cada dato y resultado que cambie queda en auditoría.
+ */
+export function guardar(db: DB, c: ControlGuardar, profesionalId: number): Control {
   const actual = obtener(db, c.id)
   const paciente = db.prepare('SELECT fecha_nacimiento AS fechaNacimiento, sexo FROM paciente WHERE id = ?').get(actual.pacienteId) as {
     fechaNacimiento: string
@@ -61,19 +104,52 @@ export function guardar(db: DB, c: ControlGuardar): Control {
   }
   if (c.estado && paciente.sexo !== 'F') throw new Error('Gestación y lactancia solo aplican a pacientes de sexo femenino')
   const gasto = calcularGastoSemanal(entradaGasto(c, paciente))
+  const edadMeses = edadEnMeses(paciente.fechaNacimiento, c.fecha)
+
+  const campos = (x: Omit<Control, 'pacienteId' | 'semana' | 'gasto' | 'edadMeses'> & { gasto: Control['gasto'] }) => ({
+    fecha: x.fecha,
+    pesoKg: x.pesoKg,
+    tallaCm: x.tallaCm,
+    formulaId: x.formulaId,
+    tmbManual: x.tmbManual,
+    modo: x.modo,
+    metReposo: x.metReposo,
+    eta: x.eta,
+    estado: x.estado,
+    motivo: x.motivo,
+    notas: x.notas,
+    tmb: x.gasto?.tmb,
+    gastoPromedio: x.gasto?.promedio
+  })
 
   const insertar = db.prepare(
     'INSERT INTO rutina_bloque (control_id, dia, actividad_id, nombre, met, minutos) VALUES (?, ?, ?, ?, ?, ?)'
   )
   db.transaction(() => {
     db.prepare(
-      `UPDATE control SET fecha = ?, peso_kg = ?, talla_cm = ?, formula_id = ?, modo_met = ?, met_reposo = ?, eta = ?,
-         estado_fisiologico = ?, gasto = ? WHERE id = ?`
-    ).run(c.fecha, c.pesoKg, c.tallaCm, c.formulaId, c.modo, c.metReposo, c.eta ? 1 : 0, c.estado, JSON.stringify(gasto), c.id)
+      `UPDATE control SET fecha = ?, edad_meses = ?, peso_kg = ?, talla_cm = ?, formula_id = ?, tmb_manual = ?, modo_met = ?,
+         met_reposo = ?, eta = ?, estado_fisiologico = ?, motivo = ?, notas = ?, gasto = ? WHERE id = ?`
+    ).run(
+      c.fecha,
+      edadMeses,
+      c.pesoKg,
+      c.tallaCm,
+      c.formulaId,
+      c.tmbManual,
+      c.modo,
+      c.metReposo,
+      c.eta ? 1 : 0,
+      c.estado,
+      c.motivo,
+      c.notas,
+      JSON.stringify(gasto),
+      c.id
+    )
     db.prepare('DELETE FROM rutina_bloque WHERE control_id = ?').run(c.id)
     c.semana.forEach((bloques, dia) => {
       for (const b of bloques) insertar.run(c.id, dia, b.actividadId, b.nombre, b.met, b.minutos)
     })
+    if (actual.gasto) auditar(db, 'control', c.id, profesionalId, campos(actual), campos({ ...c, gasto }))
   })()
   return obtener(db, c.id)
 }

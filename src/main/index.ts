@@ -87,7 +87,11 @@ manejar('catalogos.met', () => controles.actividades(base()))
 manejar('controles.listar', ({ pacienteId }) => controles.listar(base(), pacienteId))
 manejar('controles.crear', ({ pacienteId }) => ({ id: controles.crear(base(), pacienteId, profesionalId) }))
 manejar('controles.obtener', ({ id }) => controles.obtener(base(), id))
-manejar('controles.guardar', (c) => controles.guardar(base(), c))
+manejar('controles.descartar', ({ id }) => {
+  controles.descartar(base(), id)
+  return null
+})
+manejar('controles.guardar', (c) => controles.guardar(base(), c, profesionalId))
 
 function crearVentana(): void {
   const ventana = new BrowserWindow({

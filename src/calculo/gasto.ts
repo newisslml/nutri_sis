@@ -64,6 +64,9 @@ export function calcularGastoSemanal(e: EntradaGasto): ResultadoGasto {
     modo = 'tmb'
     avisos.push('Menor de 18 años: se usa el modo TMB, porque los METy del compendio juvenil son múltiplos de su TMB')
   }
+  if (e.tmbManual !== undefined && modo === 'estandar') {
+    avisos.push('En modo MET × peso la TMB ajustada no cambia el gasto; use el modo MET × TMB/24')
+  }
   if (edad < 6) avisos.push('El compendio juvenil cubre de 6 a 17 años: en menores de 6 el gasto por MET es solo referencial')
   if (e.estado?.startsWith('gestacion')) avisos.push('En gestación la TMB se calcula con el peso pregestacional')
 

@@ -31,9 +31,22 @@ export function hoyISO(): string {
   return new Date().toLocaleDateString('sv-SE')
 }
 
-/** Edad cumplida en años a una fecha dada (ambas YYYY-MM-DD). */
-export function edadEnAnios(nacimiento: string, alDia: string): number {
+/** Meses cumplidos a una fecha dada (ambas YYYY-MM-DD). */
+export function edadEnMeses(nacimiento: string, alDia: string): number {
   const [na, nm, nd] = nacimiento.split('-').map(Number)
   const [aa, am, ad] = alDia.split('-').map(Number)
-  return aa - na - (am < nm || (am === nm && ad < nd) ? 1 : 0)
+  return (aa - na) * 12 + (am - nm) - (ad < nd ? 1 : 0)
+}
+
+/** Edad cumplida en años a una fecha dada (ambas YYYY-MM-DD). */
+export function edadEnAnios(nacimiento: string, alDia: string): number {
+  return Math.floor(edadEnMeses(nacimiento, alDia) / 12)
+}
+
+/** "36 años 4 meses", "1 año", "8 meses". */
+export function formatearEdad(meses: number): string {
+  const a = Math.floor(meses / 12)
+  const m = meses % 12
+  const partes = [a > 0 && `${a} ${a === 1 ? 'año' : 'años'}`, (m > 0 || a === 0) && `${m} ${m === 1 ? 'mes' : 'meses'}`]
+  return partes.filter(Boolean).join(' ')
 }
