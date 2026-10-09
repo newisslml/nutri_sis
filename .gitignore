@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+*.log
+
+# Datos de pacientes y claves: nunca al repositorio
+*.db
+*.db-journal
+*.bak
+claves.json
