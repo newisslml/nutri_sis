@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import { claveATexto, desenvolver, envolver, nuevaClave, textoAClave } from '../src/main/claves.ts'
+import { parsearCompendio } from '../src/main/compendio.ts'
 import { edadEnAnios, formatearRut, validarRut } from '../src/shared/validaciones.ts'
 
 test('RUT: dígito verificador', () => {
@@ -26,4 +28,14 @@ test('clave: contraseña y clave de recuperación', () => {
   assert.match(texto, /^([0-9A-F]{4}-){7}[0-9A-F]{4}$/)
   assert.deepEqual(textoAClave(texto.toLowerCase()), clave)
   assert.equal(textoAClave('contraseña segura'), null)
+})
+
+test('compendio MET: 822 actividades de MET.md', () => {
+  const actividades = parsearCompendio(readFileSync(new URL('../MET.md', import.meta.url), 'utf8'))
+  assert.equal(actividades.length, 822)
+  assert.equal(new Set(actividades.map((a) => a.categoria)).size, 21)
+  const porCodigo = (c: string) => actividades.find((a) => a.codigo === c)!
+  assert.deepEqual(porCodigo('07030'), { codigo: '07030', categoria: 'Inactividad', nombre: 'Dormir', met: 0.95, estimado: false })
+  assert.equal(porCodigo('01008').estimado, true)
+  assert.equal(porCodigo('01010').nombre.startsWith('Ciclismo, <16 km/h'), true)
 })

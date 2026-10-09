@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { ZodError, type z } from 'zod'
 import { entradas, type Canal, type Respuesta, type Salidas } from '../shared/contratos'
 import { claveATexto, desenvolver, envolver, nuevaClave, textoAClave, type Envoltura } from './claves'
+import * as controles from './controles'
 import { abrirBase, type DB } from './db'
 import * as pacientes from './pacientes'
 
@@ -82,6 +83,11 @@ manejar('sesion.bloquear', () => {
 manejar('pacientes.listar', ({ busqueda, perfil }) => pacientes.listar(base(), busqueda, perfil))
 manejar('pacientes.obtener', ({ id }) => pacientes.obtener(base(), id))
 manejar('pacientes.guardar', (p) => pacientes.guardar(base(), p, profesionalId))
+manejar('catalogos.met', () => controles.actividades(base()))
+manejar('controles.listar', ({ pacienteId }) => controles.listar(base(), pacienteId))
+manejar('controles.crear', ({ pacienteId }) => ({ id: controles.crear(base(), pacienteId, profesionalId) }))
+manejar('controles.obtener', ({ id }) => controles.obtener(base(), id))
+manejar('controles.guardar', (c) => controles.guardar(base(), c))
 
 function crearVentana(): void {
   const ventana = new BrowserWindow({

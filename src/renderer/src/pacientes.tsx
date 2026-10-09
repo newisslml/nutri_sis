@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router'
 import { NOMBRE_PERFIL, PERFILES, pacienteEntrada, type Paciente, type PacienteFormulario, type Perfil } from '../../shared/contratos'
 import { edadEnAnios, hoyISO } from '../../shared/validaciones'
 import { llamar, validarCon } from './api'
+import { ListaControles } from './controles'
 
 const OPCIONES_PERFIL = PERFILES.map((p) => ({ value: p, label: NOMBRE_PERFIL[p] }))
 const OPCIONES_SEXO = [
@@ -68,7 +69,12 @@ export function FichaPaciente() {
     enabled: id !== undefined
   })
   if (id !== undefined && !paciente.data) return paciente.error ? <Alert color="red">{paciente.error.message}</Alert> : <Loader />
-  return <FormularioPaciente inicial={paciente.data} />
+  return (
+    <Stack gap="xl">
+      <FormularioPaciente inicial={paciente.data} />
+      {paciente.data && <ListaControles pacienteId={paciente.data.id} />}
+    </Stack>
+  )
 }
 
 type Valores = Omit<PacienteFormulario, 'sexo' | 'perfil'> & { sexo: string | null; perfil: string | null }

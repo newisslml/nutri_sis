@@ -22,12 +22,13 @@ La primera vez pide el nombre del profesional y una contraseña, y muestra la **
 - `%APPDATA%\SistemaNutri\nutri.db`: base SQLite cifrada (formato SQLCipher 4).
 - `%APPDATA%\SistemaNutri\claves.json`: clave de la base, cifrada con la contraseña. Se respalda junto con `nutri.db`.
 - `NUTRI_DATOS=<carpeta>` cambia esa ubicación, para probar sin tocar los datos reales.
+- La tabla MET se carga desde `MET.md` (Compendio 2011, 822 actividades) al crear o migrar la base.
 
 ## Estructura
 
 ```text
 src/calculo/    motor de cálculo puro: catálogo de fórmulas de TMB y gasto semanal por MET
-src/main/       backend: sesión y cifrado, base de datos y migraciones, pacientes
+src/main/       backend: sesión y cifrado, base de datos y migraciones, pacientes, controles y rutina
 src/preload/    puente window.nutri (única puerta de la ventana al backend)
 src/renderer/   frontend React + Mantine
 src/shared/     contratos Zod por canal y validaciones compartidas (RUT, edad)

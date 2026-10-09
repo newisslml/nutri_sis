@@ -5,6 +5,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import { llamar } from './api'
+import { PantallaControl } from './controles'
 import { FichaPaciente, ListaPacientes } from './pacientes'
 import { Desbloqueo, PrimeraVez } from './sesion'
 
@@ -33,6 +34,7 @@ function App() {
           <Route path="/pacientes" element={<ListaPacientes />} />
           <Route path="/pacientes/nuevo" element={<FichaPaciente />} />
           <Route path="/pacientes/:id" element={<FichaPaciente />} />
+          <Route path="/pacientes/:id/controles/:controlId" element={<PantallaControl />} />
           <Route path="*" element={<Navigate to="/pacientes" replace />} />
         </Routes>
       </AppShell.Main>
