@@ -32,7 +32,6 @@ export const pacienteEntrada = z
     sexo: z.enum(['F', 'M'], 'Seleccione el sexo'),
     perfil: z.enum(PERFILES, 'Seleccione un perfil'),
     disciplina: z.string().trim(),
-    antecedentes: z.string().trim(),
     objetivo: z.string().trim(),
     consentimiento: z.boolean().refine((v) => v, 'Sin consentimiento expreso no se pueden registrar datos de salud'),
     tutorNombre: z.string().trim()
@@ -57,11 +56,21 @@ const bloqueRutina = z.object({
 })
 export type BloqueRutina = z.output<typeof bloqueRutina>
 
+const examen = z.object({
+  fecha: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ingrese la fecha de cada examen')
+    .refine((f) => f <= hoyISO(), 'La fecha de un examen no puede ser futura'),
+  detalle: z.string().trim().min(1, 'Describa cada examen y su resultado')
+})
+export type Examen = z.output<typeof examen>
+
 export const controlGuardar = z.object({
   id: z.number().int().positive(),
   fecha: fecha.refine((f) => f <= hoyISO(), 'La fecha no puede ser futura'),
   pesoKg: z.number('Ingrese el peso').min(1).max(400),
   tallaCm: z.number().min(30).max(250).nullable(),
+  masaLibreGrasaKg: z.number().min(1).max(200).nullable(),
   formulaId: z.string(),
   modo: z.enum(['estandar', 'tmb']),
   metReposo: z.number().min(0.9).max(3),
@@ -70,6 +79,11 @@ export const controlGuardar = z.object({
   tmbManual: z.number().min(300, 'TMB mínima 300 kcal').max(6000, 'TMB máxima 6000 kcal').nullable(),
   motivo: z.string().trim(),
   notas: z.string().trim(),
+  alergias: z.string().trim(),
+  intolerancias: z.string().trim(),
+  enfermedades: z.string().trim(),
+  medicamentos: z.string().trim(),
+  examenes: z.array(examen),
   semana: z.array(z.array(bloqueRutina)).length(7)
 })
 export type ControlGuardar = z.output<typeof controlGuardar>
@@ -84,7 +98,13 @@ export type ControlResumen = Pick<Control, 'id' | 'fecha' | 'pesoKg' | 'tallaCm'
 /** Arma la entrada del motor igual en la pantalla (cálculo en vivo) y en el backend (cálculo que se guarda). */
 export function entradaGasto(c: ControlGuardar, p: Pick<Paciente, 'fechaNacimiento' | 'sexo'>): EntradaGasto {
   return {
-    paciente: { pesoKg: c.pesoKg, tallaCm: c.tallaCm ?? undefined, edad: edadEnAnios(p.fechaNacimiento, c.fecha), sexo: p.sexo },
+    paciente: {
+      pesoKg: c.pesoKg,
+      tallaCm: c.tallaCm ?? undefined,
+      masaLibreGrasaKg: c.masaLibreGrasaKg ?? undefined,
+      edad: edadEnAnios(p.fechaNacimiento, c.fecha),
+      sexo: p.sexo
+    },
     formulaId: c.formulaId,
     tmbManual: c.tmbManual ?? undefined,
     modo: c.modo,

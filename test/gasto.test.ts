@@ -22,6 +22,19 @@ test('FAO/OMS/UNU (Schofield) por tramo de edad', () => {
   assert.equal(s(65, 70, 'F'), 1249) // 9,082×65 + 658,5 = 1248,83
 })
 
+test('Harris-Benedict (1919)', () => {
+  // 66,473 + 13,7516×80 + 5,0033×180 − 6,755×40 = 66,473 + 1100,128 + 900,594 − 270,2 = 1796,995
+  assert.equal(tmb('harris-benedict-1919', { pesoKg: 80, tallaCm: 180, edad: 40, sexo: 'M' }), 1797)
+  // 655,0955 + 9,5634×60 + 1,8496×165 − 4,6756×30 = 655,0955 + 573,804 + 305,184 − 140,268 = 1393,8155
+  assert.equal(tmb('harris-benedict-1919', { pesoKg: 60, tallaCm: 165, edad: 30, sexo: 'F' }), 1394)
+})
+
+test('Cunningham (1980): 500 + 22 × masa libre de grasa', () => {
+  assert.equal(tmb('cunningham-1980', { pesoKg: 75, masaLibreGrasaKg: 60, edad: 28, sexo: 'M' }), 1820) // 500 + 1320
+  assert.equal(tmb('cunningham-1980', { pesoKg: 62, masaLibreGrasaKg: 45.5, edad: 35, sexo: 'F' }), 1501) // 500 + 1001
+  assert.throws(() => calcularTMB('cunningham-1980', { pesoKg: 75, edad: 28, sexo: 'M' }), /Faltan datos.*masa libre de grasa/)
+})
+
 test('datos faltantes y población', () => {
   assert.throws(() => calcularTMB('mifflin-st-jeor', { pesoKg: 60, edad: 30, sexo: 'F' }), /Faltan datos.*talla/)
   assert.deepEqual(calcularTMB('mifflin-st-jeor', { pesoKg: 30, tallaCm: 135, edad: 9, sexo: 'M' }).avisos, [

@@ -2,7 +2,7 @@ import type { Paciente, PacienteGuardar, PacienteResumen, Perfil } from '../shar
 import { auditar, type DB } from './db'
 
 const SELECT = `SELECT id, rut, nombres, apellidos, fecha_nacimiento AS fechaNacimiento, sexo, perfil, disciplina,
-  antecedentes, objetivo, tutor_nombre AS tutorNombre, consentimiento_fecha AS consentimientoFecha FROM paciente`
+  objetivo, tutor_nombre AS tutorNombre, consentimiento_fecha AS consentimientoFecha FROM paciente`
 
 export function listar(db: DB, busqueda: string, perfil: Perfil | null): PacienteResumen[] {
   // ponytail: LIKE sin paginación ni acentos; buscar "jose" no encuentra "José". FTS5 si el listado crece.
@@ -34,21 +34,20 @@ export function guardar(db: DB, p: PacienteGuardar, profesionalId: number): Paci
     sexo: p.sexo,
     perfil: p.perfil,
     disciplina: p.disciplina,
-    antecedentes: p.antecedentes,
     objetivo: p.objetivo,
     tutorNombre: p.tutorNombre
   }
   const columnas = `rut = @rut, nombres = @nombres, apellidos = @apellidos, fecha_nacimiento = @fechaNacimiento,
-    sexo = @sexo, perfil = @perfil, disciplina = @disciplina, antecedentes = @antecedentes, objetivo = @objetivo,
+    sexo = @sexo, perfil = @perfil, disciplina = @disciplina, objetivo = @objetivo,
     tutor_nombre = @tutorNombre`
 
   if (p.id === undefined) {
     const { lastInsertRowid } = db
       .prepare(
         `INSERT INTO paciente (profesional_id, consentimiento_fecha, rut, nombres, apellidos, fecha_nacimiento, sexo, perfil,
-           disciplina, antecedentes, objetivo, tutor_nombre)
+           disciplina, objetivo, tutor_nombre)
          VALUES (@profesionalId, date('now', 'localtime'), @rut, @nombres, @apellidos, @fechaNacimiento, @sexo, @perfil,
-           @disciplina, @antecedentes, @objetivo, @tutorNombre)`
+           @disciplina, @objetivo, @tutorNombre)`
       )
       .run({ ...campos, profesionalId })
     return obtener(db, Number(lastInsertRowid))

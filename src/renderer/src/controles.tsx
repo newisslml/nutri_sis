@@ -12,6 +12,7 @@ import {
   Paper,
   SegmentedControl,
   Select,
+  SimpleGrid,
   Stack,
   Switch,
   Table,
@@ -36,13 +37,19 @@ import {
   type BloqueRutina,
   type Control,
   type ControlGuardar,
+  type Examen,
   type Paciente
 } from '../../shared/contratos'
 import { edadEnMeses, formatearEdad } from '../../shared/validaciones'
 import { llamar } from './api'
 
 const kcal = (n: number) => `${n.toLocaleString('es-CL')} kcal`
-const horas = (minutos: number) => (minutos / 60).toLocaleString('es-CL', { maximumFractionDigits: 2 })
+/** 450 → "7 h 30 min", 45 → "45 min", 120 → "2 h" */
+const duracion = (minutos: number) => {
+  const h = Math.floor(minutos / 60)
+  const m = minutos % 60
+  return [h && `${h} h`, m && `${m} min`].filter(Boolean).join(' ') || '0 h'
+}
 const numero = (v: number | string) => (v === '' ? null : Number(v))
 const fechaCL = (iso: string) => iso.split('-').reverse().join('-')
 const decimal = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 1 })
@@ -56,7 +63,13 @@ const NOMBRE_ESTADO: Record<EstadoFisiologico, string> = {
   lactancia_0_6_ganancia_insuficiente: 'Lactancia, 0 a 6 meses, ganancia gestacional insuficiente',
   lactancia_7_12: 'Lactancia, 7 a 12 meses'
 }
-const OPCIONES_ESTADO = (Object.keys(ADICIONAL) as EstadoFisiologico[]).map((e) => ({
+const CAMPOS_HISTORIAL: [keyof Pick<Control, 'alergias' | 'intolerancias' | 'enfermedades' | 'medicamentos'>, string, string][] = [
+  ['alergias', 'Alergias', 'Ej.: maní, mariscos, penicilina'],
+  ['intolerancias', 'Intolerancias', 'Ej.: lactosa, fructosa'],
+  ['enfermedades', 'Enfermedades de base', 'Ej.: diabetes tipo 2, hipertensión, hipotiroidismo'],
+  ['medicamentos', 'Medicamentos y suplementos', 'Nombre, dosis y frecuencia. Ej.: metformina 850 mg c/12 h, vitamina D 2000 UI/día']
+]
+const OPCIONES_ESTADO =(Object.keys(ADICIONAL) as EstadoFisiologico[]).map((e) => ({
   value: e,
   label: `${NOMBRE_ESTADO[e]} (+${ADICIONAL[e]} kcal)`
 }))
@@ -202,8 +215,16 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
     setB((prev) => ({ ...prev, semana: prev.semana.map((d, i) => (indices.includes(i) ? prev.semana[dia].map((x) => ({ ...x })) : d)) }))
     setDestinos([])
   }
+  const cambiarExamen = (i: number, cambios: Partial<Examen>) =>
+    setB((prev) => ({ ...prev, examenes: prev.examenes.map((x, j) => (j === i ? { ...x, ...cambios } : x)) }))
 
-  const datosFormula = { pesoKg: b.pesoKg ?? 0, tallaCm: b.tallaCm ?? undefined, edad: edad ?? 0, sexo: paciente.sexo }
+  const datosFormula = {
+    pesoKg: b.pesoKg ?? 0,
+    tallaCm: b.tallaCm ?? undefined,
+    masaLibreGrasaKg: b.masaLibreGrasaKg ?? undefined,
+    edad: edad ?? 0,
+    sexo: paciente.sexo
+  }
   const minutosDia = b.semana[dia].reduce((s, x) => s + x.minutos, 0)
   const indice = imc(b.pesoKg, b.tallaCm)
   // Sin cambios pendientes se muestra el resultado congelado al guardar; editando, el cálculo en vivo.
@@ -272,6 +293,19 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                   value={b.tallaCm ?? ''}
                   onChange={(v) => cambiar({ tallaCm: numero(v) })}
                 />
+                <NumberInput
+                  label="Masa libre de grasa (kg)"
+                  description={
+                    b.masaLibreGrasaKg && b.pesoKg ? `${decimal((1 - b.masaLibreGrasaKg / b.pesoKg) * 100)} % de grasa` : 'Opcional: bioimpedancia o pliegues'
+                  }
+                  inputWrapperOrder={['label', 'input', 'description']}
+                  decimalSeparator=","
+                  decimalScale={1}
+                  min={1}
+                  max={200}
+                  value={b.masaLibreGrasaKg ?? ''}
+                  onChange={(v) => cambiar({ masaLibreGrasaKg: numero(v) })}
+                />
               </Group>
             </Paper>
 
@@ -279,7 +313,70 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
               <Tabs.List>
                 <Tabs.Tab value="rutina">Rutina y gasto</Tabs.Tab>
                 <Tabs.Tab value="notas">Motivo y notas</Tabs.Tab>
+                <Tabs.Tab value="historial">Historial médico</Tabs.Tab>
               </Tabs.List>
+
+              <Tabs.Panel value="historial" pt="md">
+                <Stack>
+                  <Paper withBorder p="md">
+                    <SimpleGrid cols={{ base: 1, md: 2 }}>
+                      {CAMPOS_HISTORIAL.map(([campo, etiqueta, ejemplo]) => (
+                        <Textarea
+                          key={campo}
+                          label={etiqueta}
+                          placeholder={ejemplo}
+                          autosize
+                          minRows={3}
+                          value={b[campo]}
+                          onChange={(e) => cambiar({ [campo]: e.currentTarget.value })}
+                        />
+                      ))}
+                    </SimpleGrid>
+                  </Paper>
+                  <Paper withBorder p="md">
+                    <Title order={4} mb="sm">
+                      Exámenes
+                    </Title>
+                    {b.examenes.length === 0 ? (
+                      <Text size="sm" c="dimmed">
+                        Sin exámenes registrados.
+                      </Text>
+                    ) : (
+                      <Table>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th w={170}>Fecha</Table.Th>
+                            <Table.Th>Examen y resultado</Table.Th>
+                            <Table.Th w={40} />
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {b.examenes.map((x, i) => (
+                            <Table.Tr key={i}>
+                              <Table.Td>
+                                <TextInput type="date" value={x.fecha} onChange={(e) => cambiarExamen(i, { fecha: e.currentTarget.value })} />
+                              </Table.Td>
+                              <Table.Td>
+                                <TextInput
+                                  placeholder="Ej.: glicemia en ayunas 98 mg/dL"
+                                  value={x.detalle}
+                                  onChange={(e) => cambiarExamen(i, { detalle: e.currentTarget.value })}
+                                />
+                              </Table.Td>
+                              <Table.Td>
+                                <CloseButton aria-label="Quitar examen" onClick={() => cambiar({ examenes: b.examenes.filter((_, j) => j !== i) })} />
+                              </Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                    )}
+                    <Button variant="light" mt="sm" onClick={() => cambiar({ examenes: [...b.examenes, { fecha: b.fecha, detalle: '' }] })}>
+                      Agregar examen
+                    </Button>
+                  </Paper>
+                </Stack>
+              </Tabs.Panel>
 
               <Tabs.Panel value="notas" pt="md">
                 <Paper withBorder p="md">
@@ -303,7 +400,10 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                       <Select
                         label="Fórmula de TMB"
                         allowDeselect={false}
-                        data={FORMULAS.map((f) => ({ value: f.id, label: f.nombre, disabled: faltantes(f, datosFormula).length > 0 }))}
+                        data={FORMULAS.map((f) => {
+                          const faltan = faltantes(f, datosFormula)
+                          return { value: f.id, label: faltan.length ? `${f.nombre} (falta ${faltan.join(', ')})` : f.nombre, disabled: faltan.length > 0 }
+                        })}
                         value={b.formulaId}
                         onChange={(v) => v && cambiar({ formulaId: v })}
                       />
@@ -361,7 +461,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                           const total = b.semana[i].reduce((s, x) => s + x.minutos, 0)
                           return (
                             <Tabs.Tab key={d} value={String(i)} c={total > 1440 ? 'red' : undefined}>
-                              {d.slice(0, 3)} · {horas(total)} h
+                              {d.slice(0, 3)} · {duracion(total)}
                             </Tabs.Tab>
                           )
                         })}
@@ -373,7 +473,8 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                         <Table.Tr>
                           <Table.Th>Actividad</Table.Th>
                           <Table.Th w={110}>MET</Table.Th>
-                          <Table.Th w={110}>Horas</Table.Th>
+                          <Table.Th w={90}>Horas</Table.Th>
+                          <Table.Th w={90}>Minutos</Table.Th>
                           <Table.Th w={40} />
                         </Table.Tr>
                       </Table.Thead>
@@ -410,14 +511,24 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                             </Table.Td>
                             <Table.Td>
                               <NumberInput
-                                decimalSeparator=","
-                                decimalScale={2}
-                                step={0.25}
-                                min={0}
+                                allowDecimal={false}
+                                allowNegative={false}
                                 max={24}
-                                value={bloque.minutos / 60}
+                                value={Math.floor(bloque.minutos / 60)}
                                 onChange={(v) =>
-                                  cambiarDia((d) => d.map((x, j) => (j === i ? { ...x, minutos: Math.round(Number(v) * 60) } : x)))
+                                  cambiarDia((d) => d.map((x, j) => (j === i ? { ...x, minutos: Number(v) * 60 + (x.minutos % 60) } : x)))
+                                }
+                              />
+                            </Table.Td>
+                            <Table.Td>
+                              {/* Más de 59 minutos pasan a horas: 90 queda en 1 h 30 min */}
+                              <NumberInput
+                                allowDecimal={false}
+                                allowNegative={false}
+                                step={5}
+                                value={bloque.minutos % 60}
+                                onChange={(v) =>
+                                  cambiarDia((d) => d.map((x, j) => (j === i ? { ...x, minutos: Math.floor(x.minutos / 60) * 60 + Number(v) } : x)))
                                 }
                               />
                             </Table.Td>
@@ -437,10 +548,10 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                         Agregar actividad
                       </Button>
                       <Text size="sm" c={minutosDia > 1440 ? 'red' : 'dimmed'}>
-                        {horas(minutosDia)} h asignadas ·{' '}
+                        {duracion(minutosDia)} asignadas ·{' '}
                         {minutosDia > 1440
-                          ? `${horas(minutosDia - 1440)} h de más`
-                          : `${horas(1440 - minutosDia)} h en reposo (${b.metReposo.toLocaleString('es-CL')} MET)`}
+                          ? `${duracion(minutosDia - 1440)} de más`
+                          : `${duracion(1440 - minutosDia)} en reposo (${b.metReposo.toLocaleString('es-CL')} MET)`}
                       </Text>
                     </Group>
                     <Group mt="md" align="flex-end">

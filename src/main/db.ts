@@ -88,7 +88,13 @@ const MIGRACIONES: (string | ((db: DB) => void))[] = [
    ALTER TABLE control ADD COLUMN notas TEXT NOT NULL DEFAULT '';
    ALTER TABLE control ADD COLUMN tmb_manual REAL;
    ALTER TABLE control ADD COLUMN edad_meses INTEGER; -- congelada a la fecha del control
-   ALTER TABLE auditoria ADD COLUMN profesional_id INTEGER REFERENCES profesional(id);`
+   ALTER TABLE auditoria ADD COLUMN profesional_id INTEGER REFERENCES profesional(id);`,
+  'ALTER TABLE control ADD COLUMN masa_libre_grasa_kg REAL;',
+  `ALTER TABLE control ADD COLUMN alergias TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN intolerancias TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN enfermedades TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN medicamentos TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN examenes TEXT NOT NULL DEFAULT '[]'; -- JSON [{fecha, detalle}]`
 ]
 
 /** Registra en auditoría cada campo cuyo valor cambió, con quién y cuándo. */

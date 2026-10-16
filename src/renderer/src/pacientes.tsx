@@ -87,7 +87,6 @@ const VACIO: Valores = {
   sexo: null,
   perfil: null,
   disciplina: '',
-  antecedentes: '',
   objetivo: '',
   consentimiento: false,
   tutorNombre: ''
@@ -125,7 +124,6 @@ function FormularioPaciente({ inicial }: { inicial?: Paciente }) {
           <TextInput label="Disciplina deportiva" {...form.getInputProps('disciplina')} />
           {menor && <TextInput label="Tutor que consiente" withAsterisk {...form.getInputProps('tutorNombre')} />}
         </SimpleGrid>
-        <Textarea label="Antecedentes" autosize minRows={3} {...form.getInputProps('antecedentes')} />
         <Textarea label="Objetivo" autosize minRows={2} {...form.getInputProps('objetivo')} />
         <Checkbox
           label={`${menor ? 'El tutor' : 'El paciente'} dio consentimiento expreso para el tratamiento de sus datos de salud`}

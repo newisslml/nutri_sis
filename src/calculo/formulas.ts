@@ -58,6 +58,27 @@ export const FORMULAS: FormulaGastoBasal[] = [
       const [, a, b] = SCHOFIELD[sexo].findLast(([desde]) => edad >= desde)!
       return a * pesoKg + b
     }
+  },
+  {
+    id: 'harris-benedict-1919',
+    version: 1,
+    nombre: 'Harris-Benedict (1919)',
+    poblacion: { edadMin: 15, edadMax: 74, descripcion: 'adultos sanos (muestra original de 15 a 74 años)' },
+    requiere: ['pesoKg', 'tallaCm', 'edad', 'sexo'],
+    fuente: 'Harris JA, Benedict FG. A biometric study of basal metabolism in man. Washington DC: Carnegie Institution of Washington; 1919. Publ. 279.',
+    calcular: ({ pesoKg, tallaCm, edad, sexo }) =>
+      sexo === 'M'
+        ? 66.473 + 13.7516 * pesoKg + 5.0033 * tallaCm! - 6.755 * edad
+        : 655.0955 + 9.5634 * pesoKg + 1.8496 * tallaCm! - 4.6756 * edad
+  },
+  {
+    id: 'cunningham-1980',
+    version: 1,
+    nombre: 'Cunningham (1980)',
+    poblacion: { edadMin: 18, descripcion: 'adultos' },
+    requiere: ['masaLibreGrasaKg'],
+    fuente: 'Cunningham JJ. A reanalysis of the factors influencing basal metabolic rate in normal adults. Am J Clin Nutr. 1980;33(11):2372-4.',
+    calcular: ({ masaLibreGrasaKg }) => 500 + 22 * masaLibreGrasaKg!
   }
 ]
 
