@@ -1,5 +1,6 @@
 // Contrato entre frontend y backend: esquemas de entrada (Zod) y tipos de salida por canal.
 import { z } from 'zod'
+import { GRUPOS, type Medidas } from '../calculo/antropometria'
 import { ADICIONAL, type EntradaGasto, type EstadoFisiologico, type ResultadoGasto } from '../calculo/gasto'
 import { edadEnAnios, formatearRut, hoyISO, validarRut } from './validaciones'
 
@@ -15,6 +16,35 @@ export const NOMBRE_PERFIL: Record<Perfil, string> = {
   deportista: 'Deportista',
   gestante: 'Gestante o nodriza'
 }
+
+export const PREFERENCIAS = ['omnivoro', 'vegetariano', 'ovolacteo_vegetariano', 'ovo_vegano', 'ovolacteo_pescetariano', 'vegano'] as const
+export const NOMBRE_PREFERENCIA: Record<(typeof PREFERENCIAS)[number], string> = {
+  omnivoro: 'Omnívoro',
+  vegetariano: 'Vegetariano',
+  ovolacteo_vegetariano: 'Ovo-lácteo vegetariano',
+  ovo_vegano: 'Ovo vegano',
+  ovolacteo_pescetariano: 'Ovo-lácteo pescetariano',
+  vegano: 'Vegano'
+}
+
+export const SINTOMAS = ['diarrea', 'vomitos', 'cefaleas', 'estrenimiento', 'gastritis'] as const
+export const NOMBRE_SINTOMA: Record<(typeof SINTOMAS)[number], string> = {
+  diarrea: 'Diarrea',
+  vomitos: 'Vómitos',
+  cefaleas: 'Cefaleas',
+  estrenimiento: 'Estreñimiento',
+  gastritis: 'Gastritis'
+}
+
+export const FRECUENCIAS = ['diario', 'semanal', 'fin_de_semana', 'ocasional'] as const
+export const NOMBRE_FRECUENCIA: Record<(typeof FRECUENCIAS)[number], string> = {
+  diario: 'Todos los días',
+  semanal: 'Varias veces por semana',
+  fin_de_semana: 'Solo fines de semana',
+  ocasional: 'Ocasional (una vez al mes o menos)'
+}
+// '' = no consume; la frecuencia = sí consume. null (marcó "Sí" sin elegir frecuencia) no pasa la validación.
+const consumo = (que: string) => z.union([z.literal(''), z.enum(FRECUENCIAS)], `Indique con qué frecuencia consume ${que}`)
 
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ingrese una fecha')
 
@@ -32,6 +62,16 @@ export const pacienteEntrada = z
     sexo: z.enum(['F', 'M'], 'Seleccione el sexo'),
     perfil: z.enum(PERFILES, 'Seleccione un perfil'),
     disciplina: z.string().trim(),
+    direccion: z.string().trim(),
+    telefono: z.string().trim(),
+    correo: z
+      .string()
+      .trim()
+      .refine((s) => s === '' || z.email().safeParse(s).success, 'Correo inválido'),
+    preferencia: z.enum(PREFERENCIAS).nullable(),
+    sintomas: z.array(z.enum(SINTOMAS)),
+    tabaco: consumo('tabaco'),
+    alcohol: consumo('alcohol'),
     objetivo: z.string().trim(),
     consentimiento: z.boolean().refine((v) => v, 'Sin consentimiento expreso no se pueden registrar datos de salud'),
     tutorNombre: z.string().trim()
@@ -65,6 +105,19 @@ const examen = z.object({
 })
 export type Examen = z.output<typeof examen>
 
+// Un registro por grupo de GRUPOS con solo los sitios medidos, cada uno dentro del rango de su grupo.
+const medidas = z.object(
+  Object.fromEntries(
+    Object.entries(GRUPOS).map(([g, { titulo, unidad, max, sitios }]) => [
+      g,
+      z.partialRecord(
+        z.enum(Object.keys(sitios)),
+        z.number().positive(`${titulo}: los valores deben ser mayores que 0`).max(max, `${titulo}: máximo ${max} ${unidad}`).optional()
+      )
+    ])
+  )
+) as unknown as z.ZodType<Medidas, Medidas>
+
 export const controlGuardar = z.object({
   id: z.number().int().positive(),
   fecha: fecha.refine((f) => f <= hoyISO(), 'La fecha no puede ser futura'),
@@ -77,6 +130,8 @@ export const controlGuardar = z.object({
   eta: z.boolean(),
   estado: z.enum(Object.keys(ADICIONAL) as [EstadoFisiologico, ...EstadoFisiologico[]]).nullable(),
   tmbManual: z.number().min(300, 'TMB mínima 300 kcal').max(6000, 'TMB máxima 6000 kcal').nullable(),
+  objetivoCalorico: z.enum(['deficit', 'normo', 'superavit']),
+  ajustePct: z.number().int().min(0).max(50, 'El ajuste calórico máximo es 50 %'),
   motivo: z.string().trim(),
   notas: z.string().trim(),
   alergias: z.string().trim(),
@@ -84,6 +139,7 @@ export const controlGuardar = z.object({
   enfermedades: z.string().trim(),
   medicamentos: z.string().trim(),
   examenes: z.array(examen),
+  antropometria: medidas,
   semana: z.array(z.array(bloqueRutina)).length(7)
 })
 export type ControlGuardar = z.output<typeof controlGuardar>
@@ -94,6 +150,8 @@ export type Control = Omit<ControlGuardar, 'pesoKg'> & {
   gasto: ResultadoGasto | null
 }
 export type ControlResumen = Pick<Control, 'id' | 'fecha' | 'pesoKg' | 'tallaCm' | 'edadMeses' | 'motivo'> & { promedioKcal: number | null }
+/** Lo que el informe antropométrico necesita de cada control con peso para graficar la evolución. */
+export type EvolucionControl = Pick<Control, 'id' | 'fecha' | 'tallaCm' | 'antropometria'> & { pesoKg: number }
 
 /** Arma la entrada del motor igual en la pantalla (cálculo en vivo) y en el backend (cálculo que se guarda). */
 export function entradaGasto(c: ControlGuardar, p: Pick<Paciente, 'fechaNacimiento' | 'sexo'>): EntradaGasto {
@@ -129,6 +187,7 @@ export const entradas = {
   'catalogos.met': z.undefined(),
   'controles.listar': z.object({ pacienteId: z.number().int().positive() }),
   'controles.crear': z.object({ pacienteId: z.number().int().positive() }),
+  'controles.evolucion': z.object({ pacienteId: z.number().int().positive() }),
   'controles.obtener': z.object({ id: z.number().int().positive() }),
   'controles.descartar': z.object({ id: z.number().int().positive() }),
   'controles.guardar': controlGuardar
@@ -145,6 +204,7 @@ export type Salidas = {
   'catalogos.met': ActividadMet[]
   'controles.listar': ControlResumen[]
   'controles.crear': { id: number }
+  'controles.evolucion': EvolucionControl[]
   'controles.obtener': Control
   'controles.descartar': null
   'controles.guardar': Control

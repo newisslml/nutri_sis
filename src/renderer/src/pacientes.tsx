@@ -1,18 +1,83 @@
-import { Alert, Button, Checkbox, Group, Loader, Select, SimpleGrid, Stack, Table, Textarea, TextInput, Title } from '@mantine/core'
+import {
+  Alert,
+  Button,
+  Center,
+  Checkbox,
+  Fieldset,
+  Group,
+  Loader,
+  Select,
+  SimpleGrid,
+  Stack,
+  Switch,
+  Table,
+  Textarea,
+  TextInput,
+  Title,
+  useComputedColorScheme
+} from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { NOMBRE_PERFIL, PERFILES, pacienteEntrada, type Paciente, type PacienteFormulario, type Perfil } from '../../shared/contratos'
+import {
+  FRECUENCIAS,
+  NOMBRE_FRECUENCIA,
+  NOMBRE_PERFIL,
+  NOMBRE_PREFERENCIA,
+  NOMBRE_SINTOMA,
+  PERFILES,
+  PREFERENCIAS,
+  SINTOMAS,
+  pacienteEntrada,
+  type Paciente,
+  type PacienteFormulario,
+  type Perfil
+} from '../../shared/contratos'
 import { edadEnAnios, hoyISO } from '../../shared/validaciones'
-import { llamar, validarCon } from './api'
+import { llamar, useCambiosPendientes, validarCon } from './api'
 import { ListaControles } from './controles'
+import { Grupo, UsuarioMas } from './iconos'
 
 const OPCIONES_PERFIL = PERFILES.map((p) => ({ value: p, label: NOMBRE_PERFIL[p] }))
+const OPCIONES_PREFERENCIA = PREFERENCIAS.map((p) => ({ value: p, label: NOMBRE_PREFERENCIA[p] }))
+const OPCIONES_FRECUENCIA = FRECUENCIAS.map((f) => ({ value: f, label: NOMBRE_FRECUENCIA[f] }))
 const OPCIONES_SEXO = [
   { value: 'F', label: 'Femenino' },
   { value: 'M', label: 'Masculino' }
 ]
+
+// Violeta del diseño en Figma, oscurecido hacia abajo: el texto blanco contrasta entre 4,8:1 y 7,9:1 (WCAG AA).
+const DEGRADADO = { from: '#6359FF', to: '#4338CA', deg: 135 }
+
+export function Inicio() {
+  const navegar = useNavigate()
+  const oscuro = useComputedColorScheme('light') === 'dark'
+  const boton = {
+    className: 'icono-animado',
+    variant: 'gradient',
+    gradient: DEGRADADO,
+    w: 360,
+    h: 300,
+    radius: 'md',
+    fz: 26,
+    styles: { label: { flexDirection: 'column', justifyContent: 'center', gap: 8 } } // ícono arriba del texto, centrados
+  } as const
+  return (
+    <Center bg={oscuro ? 'dark.6' : '#D9D9D9'} mih="calc(100dvh - 56px - 2 * var(--mantine-spacing-md))" style={{ borderRadius: 'var(--mantine-radius-md)' }}>
+      <Group gap={64}>
+        <Button {...boton} onClick={() => navegar('/pacientes/nuevo')}>
+          <UsuarioMas size={200} />
+          Paciente nuevo
+        </Button>
+        <Button {...boton} onClick={() => navegar('/pacientes')}>
+          <Grupo size={200} />
+          Paciente existente
+        </Button>
+      </Group>
+    </Center>
+  )
+}
 
 export function ListaPacientes() {
   const navegar = useNavigate()
@@ -77,7 +142,14 @@ export function FichaPaciente() {
   )
 }
 
-type Valores = Omit<PacienteFormulario, 'sexo' | 'perfil'> & { sexo: string | null; perfil: string | null }
+type Valores = Omit<PacienteFormulario, 'sexo' | 'perfil' | 'preferencia' | 'sintomas' | 'tabaco' | 'alcohol'> & {
+  sexo: string | null
+  perfil: string | null
+  preferencia: string | null
+  sintomas: string[]
+  tabaco: string | null
+  alcohol: string | null
+}
 
 const VACIO: Valores = {
   rut: '',
@@ -87,6 +159,13 @@ const VACIO: Valores = {
   sexo: null,
   perfil: null,
   disciplina: '',
+  direccion: '',
+  telefono: '',
+  correo: '',
+  preferencia: null,
+  sintomas: [],
+  tabaco: '',
+  alcohol: '',
   objetivo: '',
   consentimiento: false,
   tutorNombre: ''
@@ -99,6 +178,7 @@ function FormularioPaciente({ inicial }: { inicial?: Paciente }) {
     initialValues: inicial ? { ...inicial, rut: inicial.rut ?? '' } : VACIO,
     validate: validarCon(pacienteEntrada)
   })
+  useCambiosPendientes(form.isDirty())
   const guardar = useMutation({
     mutationFn: (v: Valores) => llamar('pacientes.guardar', v as PacienteFormulario),
     onSuccess: async () => {
@@ -122,8 +202,39 @@ function FormularioPaciente({ inicial }: { inicial?: Paciente }) {
           <Select label="Sexo biológico" description="Lo usan las fórmulas y ecuaciones" data={OPCIONES_SEXO} withAsterisk {...form.getInputProps('sexo')} />
           <Select label="Perfil" data={OPCIONES_PERFIL} withAsterisk {...form.getInputProps('perfil')} />
           <TextInput label="Disciplina deportiva" {...form.getInputProps('disciplina')} />
+          <Select label="Preferencia alimentaria" data={OPCIONES_PREFERENCIA} clearable {...form.getInputProps('preferencia')} />
           {menor && <TextInput label="Tutor que consiente" withAsterisk {...form.getInputProps('tutorNombre')} />}
         </SimpleGrid>
+        <Fieldset legend="Contacto">
+          <SimpleGrid cols={3}>
+            <TextInput label="Dirección de domicilio" {...form.getInputProps('direccion')} />
+            <TextInput label="Teléfono" placeholder="+56 9 1234 5678" {...form.getInputProps('telefono')} />
+            <TextInput label="Correo" type="email" placeholder="nombre@correo.cl" {...form.getInputProps('correo')} />
+          </SimpleGrid>
+        </Fieldset>
+        <Fieldset legend="Anamnesis próxima">
+          <Stack>
+            <Checkbox.Group label="Síntomas presentes" {...form.getInputProps('sintomas')}>
+              <Group mt="xs">
+                {SINTOMAS.map((s) => (
+                  <Checkbox key={s} value={s} label={NOMBRE_SINTOMA[s]} />
+                ))}
+              </Group>
+            </Checkbox.Group>
+            <SimpleGrid cols={2}>
+              {(['tabaco', 'alcohol'] as const).map((campo) => (
+                <Stack key={campo} gap="xs">
+                  <Switch
+                    label={`Consume ${campo}`}
+                    checked={form.values[campo] !== ''}
+                    onChange={(e) => form.setFieldValue(campo, e.currentTarget.checked ? null : '')}
+                  />
+                  {form.values[campo] !== '' && <Select placeholder="¿Con qué frecuencia?" data={OPCIONES_FRECUENCIA} {...form.getInputProps(campo)} />}
+                </Stack>
+              ))}
+            </SimpleGrid>
+          </Stack>
+        </Fieldset>
         <Textarea label="Objetivo" autosize minRows={2} {...form.getInputProps('objetivo')} />
         <Checkbox
           label={`${menor ? 'El tutor' : 'El paciente'} dio consentimiento expreso para el tratamiento de sus datos de salud`}

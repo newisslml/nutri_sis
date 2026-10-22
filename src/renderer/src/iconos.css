@@ -1,0 +1,97 @@
+/* Animación de los íconos (iconos.tsx) al pasar el mouse por su botón, como en itshover.com, pero en CSS en vez de la librería motion. */
+.icono-animado :is(path, g) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.icono-animado .puerta {
+  transform-origin: center bottom;
+}
+.icono-animado .grillete {
+  transform-origin: 50% 100%;
+}
+
+/* Al entrar se animan una vez: la casa se arma (techo, casa y después la puerta), el sol late y la luna se mece. */
+.icono-animado:hover .techo {
+  animation: techo 0.4s ease-out;
+}
+.icono-animado:hover .casa {
+  animation: casa 0.3s ease-out;
+}
+.icono-animado:hover .puerta {
+  animation: puerta 0.3s ease-out 0.3s backwards;
+}
+.icono-animado:hover .sol {
+  animation: sol 0.4s ease-in-out;
+}
+.icono-animado:hover .rayos {
+  animation: rayos 0.5s ease-in-out;
+}
+.icono-animado:hover .luna {
+  animation: luna 0.5s ease-in-out;
+}
+@keyframes sol {
+  50% {
+    transform: scale(0.8);
+  }
+}
+@keyframes rayos {
+  50% {
+    opacity: 0.4;
+  }
+}
+@keyframes luna {
+  50% {
+    transform: rotate(-15deg) scale(1.1);
+  }
+}
+@keyframes techo {
+  from {
+    transform: translateY(-2px);
+    opacity: 0.6;
+  }
+}
+@keyframes casa {
+  from {
+    transform: scale(0.95);
+  }
+}
+@keyframes puerta {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+/* El resto se mueve mientras el mouse está encima y vuelve al salir. */
+.icono-animado :is(.grillete, .avatar, .mas, .centro, .izquierda, .derecha) {
+  transition: transform 0.22s ease-in-out;
+}
+.icono-animado:hover :is(.grillete, .avatar, .mas, .centro, .izquierda, .derecha) {
+  transition: transform 0.28s ease-out;
+}
+.icono-animado:hover .grillete {
+  transform: translate(3px, -1.7px) rotate(40deg); /* el candado se abre */
+}
+.icono-animado:hover .avatar {
+  transform: translateY(-1px) scale(1.05);
+}
+.icono-animado:hover .mas {
+  transform: scale(1.15) rotate(90deg);
+}
+.icono-animado:hover .centro {
+  transform: translateY(-2px) scale(1.05);
+}
+.icono-animado:hover .izquierda {
+  transform: translateX(-1px) scale(1.02);
+  transition-delay: 0.05s;
+}
+.icono-animado:hover .derecha {
+  transform: translateX(1px) scale(1.02);
+  transition-delay: 0.05s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icono-animado * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

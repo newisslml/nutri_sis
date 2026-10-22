@@ -94,7 +94,17 @@ const MIGRACIONES: (string | ((db: DB) => void))[] = [
    ALTER TABLE control ADD COLUMN intolerancias TEXT NOT NULL DEFAULT '';
    ALTER TABLE control ADD COLUMN enfermedades TEXT NOT NULL DEFAULT '';
    ALTER TABLE control ADD COLUMN medicamentos TEXT NOT NULL DEFAULT '';
-   ALTER TABLE control ADD COLUMN examenes TEXT NOT NULL DEFAULT '[]'; -- JSON [{fecha, detalle}]`
+   ALTER TABLE control ADD COLUMN examenes TEXT NOT NULL DEFAULT '[]'; -- JSON [{fecha, detalle}]`,
+  `ALTER TABLE paciente ADD COLUMN direccion TEXT NOT NULL DEFAULT '';
+   ALTER TABLE paciente ADD COLUMN telefono TEXT NOT NULL DEFAULT '';
+   ALTER TABLE paciente ADD COLUMN correo TEXT NOT NULL DEFAULT '';
+   ALTER TABLE paciente ADD COLUMN preferencia TEXT;
+   ALTER TABLE paciente ADD COLUMN sintomas TEXT NOT NULL DEFAULT '[]'; -- JSON con códigos de SINTOMAS
+   ALTER TABLE paciente ADD COLUMN tabaco TEXT NOT NULL DEFAULT '';
+   ALTER TABLE paciente ADD COLUMN alcohol TEXT NOT NULL DEFAULT '';
+   ALTER TABLE control ADD COLUMN objetivo_calorico TEXT NOT NULL DEFAULT 'normo';
+   ALTER TABLE control ADD COLUMN ajuste_pct INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE control ADD COLUMN antropometria TEXT NOT NULL DEFAULT '{}'; -- JSON {grupo: {sitio: valor}}, sitios en calculo/antropometria.ts`
 ]
 
 /** Registra en auditoría cada campo cuyo valor cambió, con quién y cuándo. */

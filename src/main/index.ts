@@ -86,6 +86,7 @@ manejar('pacientes.guardar', (p) => pacientes.guardar(base(), p, profesionalId))
 manejar('catalogos.met', () => controles.actividades(base()))
 manejar('controles.listar', ({ pacienteId }) => controles.listar(base(), pacienteId))
 manejar('controles.crear', ({ pacienteId }) => ({ id: controles.crear(base(), pacienteId, profesionalId) }))
+manejar('controles.evolucion', ({ pacienteId }) => controles.evolucion(base(), pacienteId))
 manejar('controles.obtener', ({ id }) => controles.obtener(base(), id))
 manejar('controles.descartar', ({ id }) => {
   controles.descartar(base(), id)

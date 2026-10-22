@@ -29,6 +29,18 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
+import {
+  GRUPOS,
+  PLIEGUES_4,
+  PLIEGUES_6,
+  PLIEGUES_8,
+  durninWomersley,
+  kerr,
+  sumaPliegues,
+  type DatosAntropometria,
+  type Grupo,
+  type Sitio
+} from '../../calculo/antropometria'
 import { FORMULAS, faltantes } from '../../calculo/formulas'
 import { ADICIONAL, DIAS, calcularGastoSemanal, type EstadoFisiologico } from '../../calculo/gasto'
 import {
@@ -40,8 +52,10 @@ import {
   type Examen,
   type Paciente
 } from '../../shared/contratos'
-import { edadEnMeses, formatearEdad } from '../../shared/validaciones'
-import { llamar } from './api'
+import { edadEnAnios, edadEnMeses, formatearEdad } from '../../shared/validaciones'
+import { llamar, useCambiosPendientes } from './api'
+import { decimal, fechaCL, kilos } from './formato'
+import { InformeBicompartimental, InformePentacompartimental, type PuntoEvolucion } from './informes'
 
 const kcal = (n: number) => `${n.toLocaleString('es-CL')} kcal`
 /** 450 → "7 h 30 min", 45 → "45 min", 120 → "2 h" */
@@ -51,8 +65,6 @@ const duracion = (minutos: number) => {
   return [h && `${h} h`, m && `${m} min`].filter(Boolean).join(' ') || '0 h'
 }
 const numero = (v: number | string) => (v === '' ? null : Number(v))
-const fechaCL = (iso: string) => iso.split('-').reverse().join('-')
-const decimal = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 1 })
 const imc = (pesoKg: number | null, tallaCm: number | null) => (pesoKg && tallaCm ? pesoKg / (tallaCm / 100) ** 2 : null)
 
 const NOMBRE_ESTADO: Record<EstadoFisiologico, string> = {
@@ -68,6 +80,11 @@ const CAMPOS_HISTORIAL: [keyof Pick<Control, 'alergias' | 'intolerancias' | 'enf
   ['intolerancias', 'Intolerancias', 'Ej.: lactosa, fructosa'],
   ['enfermedades', 'Enfermedades de base', 'Ej.: diabetes tipo 2, hipertensión, hipotiroidismo'],
   ['medicamentos', 'Medicamentos y suplementos', 'Nombre, dosis y frecuencia. Ej.: metformina 850 mg c/12 h, vitamina D 2000 UI/día']
+]
+const SUMAS_PLIEGUES: [string, Sitio<'pliegues'>[]][] = [
+  ['Σ 4 pliegues (Durnin)', PLIEGUES_4],
+  ['Σ 6 pliegues (Kerr)', PLIEGUES_6],
+  ['Σ 8 pliegues', PLIEGUES_8]
 ]
 const OPCIONES_ESTADO =(Object.keys(ADICIONAL) as EstadoFisiologico[]).map((e) => ({
   value: e,
@@ -182,8 +199,8 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
   const meses = fechaValida ? edadEnMeses(paciente.fechaNacimiento, b.fecha) : null
   const edad = meses === null ? null : Math.floor(meses / 12)
   const calculo = useMemo(() => {
-    if (!b.pesoKg) return { error: 'Ingrese el peso para calcular el gasto' }
-    if (!fechaValida) return { error: 'Ingrese la fecha del control' }
+    if (!b.pesoKg) return { error: 'Ingrese el peso en la pestaña Antropometría para calcular el gasto' }
+    if (!fechaValida) return { error: 'Ingrese la fecha del control en la pestaña Antropometría' }
     try {
       return { resultado: calcularGastoSemanal(entradaGasto(b as ControlGuardar, paciente)) }
     } catch (e) {
@@ -196,6 +213,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
     onSuccess: (r) => {
       qc.setQueryData(['control', String(r.id)], r)
       qc.invalidateQueries({ queryKey: ['controles', r.pacienteId] })
+      qc.invalidateQueries({ queryKey: ['evolucion', r.pacienteId] })
       setGuardado(JSON.stringify(b))
     }
   })
@@ -217,6 +235,12 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
   }
   const cambiarExamen = (i: number, cambios: Partial<Examen>) =>
     setB((prev) => ({ ...prev, examenes: prev.examenes.map((x, j) => (j === i ? { ...x, ...cambios } : x)) }))
+  // Borrar un valor lo deja en undefined (no se guarda) sin mover la clave, para que "sin cambios" siga comparando igual.
+  const cambiarMedida = (g: Grupo, sitio: string, v: number | string) =>
+    setB((prev) => ({
+      ...prev,
+      antropometria: { ...prev.antropometria, [g]: { ...prev.antropometria[g], [sitio]: numero(v) ?? undefined } }
+    }))
 
   const datosFormula = {
     pesoKg: b.pesoKg ?? 0,
@@ -227,10 +251,32 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
   }
   const minutosDia = b.semana[dia].reduce((s, x) => s + x.minutos, 0)
   const indice = imc(b.pesoKg, b.tallaCm)
+  const datosAntropometria: DatosAntropometria | null =
+    b.pesoKg && b.tallaCm && edad !== null ? { pesoKg: b.pesoKg, tallaCm: b.tallaCm, edad, sexo: paciente.sexo, medidas: b.antropometria } : null
+  // ponytail: composición en vivo desde las medidas, no se congela al guardar; congelar con id y versión como el gasto cuando se fijen las ecuaciones.
+  const composicion = datosAntropometria && { kerr: kerr(datosAntropometria), durnin: durninWomersley(datosAntropometria) }
+  const historial = useQuery({ queryKey: ['evolucion', paciente.id], queryFn: () => llamar('controles.evolucion', { pacienteId: paciente.id }) })
+  // El control abierto entra con lo que se está editando; los demás, como quedaron guardados.
+  const evolucion = useMemo<PuntoEvolucion[]>(() => {
+    const guardados = (historial.data ?? []).filter((c) => c.id !== b.id).map((c) => ({ ...c, medidas: c.antropometria }))
+    const abierto = fechaValida ? [{ fecha: b.fecha, pesoKg: b.pesoKg, tallaCm: b.tallaCm, medidas: b.antropometria }] : []
+    return [...guardados, ...abierto]
+      .sort((x, y) => x.fecha.localeCompare(y.fecha))
+      .flatMap((c) =>
+        c.pesoKg && c.tallaCm
+          ? [{ fecha: c.fecha, datos: { pesoKg: c.pesoKg, tallaCm: c.tallaCm, edad: edadEnAnios(paciente.fechaNacimiento, c.fecha), sexo: paciente.sexo, medidas: c.medidas } }]
+          : []
+      )
+  }, [historial.data, b.id, b.fecha, b.pesoKg, b.tallaCm, b.antropometria, fechaValida, paciente])
+  const informe = { datos: datosAntropometria, paciente, fecha: b.fecha, edadMeses: meses, enfermedades: b.enfermedades, evolucion }
+  const enInforme = pestana === 'penta' || pestana === 'bi'
   // Sin cambios pendientes se muestra el resultado congelado al guardar; editando, el cálculo en vivo.
   const sinCambios = JSON.stringify(b) === guardado
+  useCambiosPendientes(!sinCambios)
   const congelado = sinCambios ? inicial.gasto : null
   const r = congelado ?? calculo.resultado
+  const signo = { deficit: -1, normo: 0, superavit: 1 }[b.objetivoCalorico]
+  const meta = r ? Math.round(r.promedio * (1 + (signo * b.ajustePct) / 100)) : 0
 
   function volver() {
     if (sinCambios || window.confirm('Hay cambios sin guardar. ¿Salir sin guardarlos?')) navegar(`/pacientes/${paciente.id}`)
@@ -268,53 +314,110 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
       {(guardar.error ?? descartar.error) && <Alert color="red">{(guardar.error ?? descartar.error)!.message}</Alert>}
 
       <Grid>
-        <Grid.Col span={{ base: 12, lg: 8 }}>
+        <Grid.Col span={{ base: 12, lg: enInforme ? 12 : 8 }}>
           <Stack>
-            <Paper withBorder p="md">
-              <Group grow align="flex-start">
-                <TextInput label="Fecha" type="date" value={b.fecha} onChange={(e) => cambiar({ fecha: e.currentTarget.value })} />
-                <NumberInput
-                  label="Peso (kg)"
-                  decimalSeparator=","
-                  decimalScale={1}
-                  min={1}
-                  max={400}
-                  value={b.pesoKg ?? ''}
-                  onChange={(v) => cambiar({ pesoKg: numero(v) })}
-                />
-                <NumberInput
-                  label="Talla (cm)"
-                  description={indice === null ? undefined : `IMC ${decimal(indice)} kg/m²`}
-                  inputWrapperOrder={['label', 'input', 'description']}
-                  decimalSeparator=","
-                  decimalScale={1}
-                  min={30}
-                  max={250}
-                  value={b.tallaCm ?? ''}
-                  onChange={(v) => cambiar({ tallaCm: numero(v) })}
-                />
-                <NumberInput
-                  label="Masa libre de grasa (kg)"
-                  description={
-                    b.masaLibreGrasaKg && b.pesoKg ? `${decimal((1 - b.masaLibreGrasaKg / b.pesoKg) * 100)} % de grasa` : 'Opcional: bioimpedancia o pliegues'
-                  }
-                  inputWrapperOrder={['label', 'input', 'description']}
-                  decimalSeparator=","
-                  decimalScale={1}
-                  min={1}
-                  max={200}
-                  value={b.masaLibreGrasaKg ?? ''}
-                  onChange={(v) => cambiar({ masaLibreGrasaKg: numero(v) })}
-                />
-              </Group>
-            </Paper>
-
             <Tabs value={pestana} onChange={setPestana} variant="outline">
               <Tabs.List>
                 <Tabs.Tab value="rutina">Rutina y gasto</Tabs.Tab>
+                <Tabs.Tab value="antropometria">Antropometría</Tabs.Tab>
+                <Tabs.Tab value="penta">Pentacompartimental</Tabs.Tab>
+                <Tabs.Tab value="bi">Bicompartimental</Tabs.Tab>
                 <Tabs.Tab value="notas">Motivo y notas</Tabs.Tab>
                 <Tabs.Tab value="historial">Historial médico</Tabs.Tab>
               </Tabs.List>
+
+              <Tabs.Panel value="antropometria" pt="md">
+                <Stack>
+                  <Paper withBorder p="md">
+                    <Group grow align="flex-start">
+                      <TextInput label="Fecha" type="date" value={b.fecha} onChange={(e) => cambiar({ fecha: e.currentTarget.value })} />
+                      <NumberInput
+                        label="Peso (kg)"
+                        decimalSeparator=","
+                        decimalScale={1}
+                        min={1}
+                        max={400}
+                        value={b.pesoKg ?? ''}
+                        onChange={(v) => cambiar({ pesoKg: numero(v) })}
+                      />
+                      <NumberInput
+                        label="Talla (cm)"
+                        description={indice === null ? undefined : `IMC ${decimal(indice)} kg/m²`}
+                        inputWrapperOrder={['label', 'input', 'description']}
+                        decimalSeparator=","
+                        decimalScale={1}
+                        min={30}
+                        max={250}
+                        value={b.tallaCm ?? ''}
+                        onChange={(v) => cambiar({ tallaCm: numero(v) })}
+                      />
+                      <NumberInput
+                        label="Masa libre de grasa (kg)"
+                        description={
+                          b.masaLibreGrasaKg && b.pesoKg
+                            ? `${decimal((1 - b.masaLibreGrasaKg / b.pesoKg) * 100)} % de grasa`
+                            : 'Opcional: bioimpedancia o pliegues'
+                        }
+                        inputWrapperOrder={['label', 'input', 'description']}
+                        decimalSeparator=","
+                        decimalScale={1}
+                        min={1}
+                        max={200}
+                        value={b.masaLibreGrasaKg ?? ''}
+                        onChange={(v) => cambiar({ masaLibreGrasaKg: numero(v) })}
+                      />
+                    </Group>
+                  </Paper>
+                  {(Object.keys(GRUPOS) as Grupo[]).map((g) => (
+                    <Paper withBorder p="md" key={g}>
+                      <Title order={4} mb="sm">
+                        {GRUPOS[g].titulo} ({GRUPOS[g].unidad})
+                      </Title>
+                      <SimpleGrid cols={{ base: 2, md: 4 }}>
+                        {Object.entries(GRUPOS[g].sitios).map(([sitio, nombre]) => (
+                          <NumberInput
+                            key={sitio}
+                            label={nombre}
+                            decimalSeparator=","
+                            decimalScale={1}
+                            allowNegative={false}
+                            max={GRUPOS[g].max}
+                            value={(b.antropometria[g] as Record<string, number | undefined>)[sitio] ?? ''}
+                            onChange={(v) => cambiarMedida(g, sitio, v)}
+                          />
+                        ))}
+                      </SimpleGrid>
+                      {g === 'pliegues' && (
+                        <Group mt="md" gap="xl">
+                          {SUMAS_PLIEGUES.map(([nombre, sitios]) => {
+                            const suma = sumaPliegues(b.antropometria, sitios)
+                            return (
+                              <Text key={nombre} size="sm">
+                                {nombre}:{' '}
+                                {'mm' in suma ? (
+                                  <b>{decimal(suma.mm)} mm</b>
+                                ) : (
+                                  <Text span c="dimmed" size="sm">
+                                    {suma.faltan.length === 1 ? 'falta 1' : `faltan ${suma.faltan.length}`}
+                                  </Text>
+                                )}
+                              </Text>
+                            )
+                          })}
+                        </Group>
+                      )}
+                    </Paper>
+                  ))}
+                </Stack>
+              </Tabs.Panel>
+
+              <Tabs.Panel value="penta" pt="md">
+                <InformePentacompartimental {...informe} />
+              </Tabs.Panel>
+
+              <Tabs.Panel value="bi" pt="md">
+                <InformeBicompartimental {...informe} />
+              </Tabs.Panel>
 
               <Tabs.Panel value="historial" pt="md">
                 <Stack>
@@ -574,7 +677,83 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
           </Stack>
         </Grid.Col>
 
-        <Grid.Col span={{ base: 12, lg: 4 }}>
+        <Grid.Col span={{ base: 12, lg: 4 }} display={enInforme ? 'none' : undefined}>
+          {pestana === 'antropometria' && (
+            <Paper withBorder p="md" mb="md">
+              <Title order={4} mb="sm">
+                Composición corporal
+              </Title>
+              {!composicion ? (
+                <Text size="sm" c="dimmed">
+                  Ingrese fecha, peso y talla para calcular
+                </Text>
+              ) : (
+                <Stack gap="sm">
+                  <Text fw={600}>Kerr (5 componentes)</Text>
+                  {'faltan' in composicion.kerr ? (
+                    <Text size="sm" c="dimmed">
+                      Falta: {composicion.kerr.faltan.join(', ')}
+                    </Text>
+                  ) : (
+                    <>
+                      <Table>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>Masa</Table.Th>
+                            <Table.Th ta="right">kg</Table.Th>
+                            <Table.Th ta="right">%</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {(
+                            [
+                              ['Adiposa', composicion.kerr.resultado.adiposa],
+                              ['Muscular', composicion.kerr.resultado.muscular],
+                              ['Ósea', composicion.kerr.resultado.osea],
+                              ['Residual', composicion.kerr.resultado.residual],
+                              ['Piel', composicion.kerr.resultado.piel]
+                            ] as const
+                          ).map(([nombre, c]) => (
+                            <Table.Tr key={nombre}>
+                              <Table.Td>{nombre}</Table.Td>
+                              <Table.Td ta="right">{kilos(c.kg)}</Table.Td>
+                              <Table.Td ta="right">{decimal(c.pct)} %</Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                      <Text size="sm" c="dimmed">
+                        Masa libre de grasa {kilos(composicion.kerr.resultado.masaLibreGrasaKg)} kg · suma de masas sin ajustar{' '}
+                        {kilos(composicion.kerr.resultado.pesoEstructuradoKg)} kg (
+                        {decimal((composicion.kerr.resultado.pesoEstructuradoKg / b.pesoKg! - 1) * 100)} % respecto al peso)
+                      </Text>
+                    </>
+                  )}
+                  <Text fw={600}>Durnin-Womersley + Siri</Text>
+                  {'faltan' in composicion.durnin ? (
+                    <Text size="sm" c="dimmed">
+                      Falta: {composicion.durnin.faltan.join(', ')}
+                    </Text>
+                  ) : (
+                    <>
+                      <Text>
+                        Grasa: <b>{decimal(composicion.durnin.resultado.grasaPct)} %</b> ({kilos(composicion.durnin.resultado.grasaKg)} kg)
+                        <Text span c="dimmed" size="sm">
+                          {' '}
+                          · masa libre de grasa {kilos(composicion.durnin.resultado.masaLibreGrasaKg)} kg
+                        </Text>
+                      </Text>
+                      {composicion.durnin.resultado.avisos.map((a) => (
+                        <Alert key={a} color="yellow">
+                          {a}
+                        </Alert>
+                      ))}
+                    </>
+                  )}
+                </Stack>
+              )}
+            </Paper>
+          )}
           <Paper withBorder p="md">
             <Group justify="space-between" mb="sm">
               <Title order={4}>Gasto energético</Title>
@@ -600,7 +779,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                 <Table>
                   <Table.Tbody>
                     {DIAS.map((d, i) => (
-                      <Table.Tr key={d} bg={i === dia ? 'var(--mantine-color-blue-light)' : undefined}>
+                      <Table.Tr key={d} bg={i === dia ? 'var(--mantine-primary-color-light)' : undefined}>
                         <Table.Td>{d}</Table.Td>
                         <Table.Td ta="right">{kcal(r.porDia[i])}</Table.Td>
                       </Table.Tr>
@@ -616,6 +795,47 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                     {a}
                   </Alert>
                 ))}
+              </Stack>
+            )}
+          </Paper>
+          <Paper withBorder p="md" mt="md">
+            <Title order={4} mb="sm">
+              Objetivo calórico
+            </Title>
+            <SegmentedControl
+              fullWidth
+              data={[
+                { value: 'deficit', label: 'Déficit' },
+                { value: 'normo', label: 'Normocalórico' },
+                { value: 'superavit', label: 'Superávit' }
+              ]}
+              value={b.objetivoCalorico}
+              onChange={(v) => cambiar({ objetivoCalorico: v as Borrador['objetivoCalorico'], ajustePct: v === 'normo' ? 0 : b.ajustePct })}
+            />
+            <NumberInput
+              mt="sm"
+              label="Porcentaje respecto al GET"
+              suffix=" %"
+              allowDecimal={false}
+              allowNegative={false}
+              max={50}
+              disabled={b.objetivoCalorico === 'normo'}
+              value={b.ajustePct}
+              onChange={(v) => cambiar({ ajustePct: Number(v) })}
+            />
+            {r && (
+              <Stack gap="sm" mt="md">
+                <Text>
+                  Meta: <b>{kcal(meta)}/día</b>
+                  <Text span c="dimmed" size="sm">
+                    {' '}
+                    ·{' '}
+                    {signo === 0
+                      ? 'igual al GET'
+                      : `GET ${signo < 0 ? '−' : '+'} ${b.ajustePct} % (${kcal(Math.abs(meta - r.promedio))})`}
+                  </Text>
+                </Text>
+                {meta < r.tmb && <Alert color="yellow">La meta queda bajo la TMB ({kcal(r.tmb)})</Alert>}
               </Stack>
             )}
           </Paper>
