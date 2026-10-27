@@ -43,6 +43,7 @@ import {
 } from '../../calculo/antropometria'
 import { FORMULAS, faltantes } from '../../calculo/formulas'
 import { ADICIONAL, DIAS, calcularGastoSemanal, type EstadoFisiologico } from '../../calculo/gasto'
+import { requerimientoDia } from '../../calculo/intercambio'
 import {
   entradaGasto,
   type ActividadMet,
@@ -53,11 +54,12 @@ import {
   type Paciente
 } from '../../shared/contratos'
 import { edadEnAnios, edadEnMeses, formatearEdad } from '../../shared/validaciones'
+import { ArmadorPauta, PanelObjetivo, PestanaRecordatorio, requerimientosSemana } from './alimentacion'
 import { llamar, useCambiosPendientes } from './api'
-import { decimal, fechaCL, kilos } from './formato'
+import { decimal, fechaCL, kcal, kilos } from './formato'
 import { InformeBicompartimental, InformePentacompartimental, type PuntoEvolucion } from './informes'
+import { PautaPaciente } from './pauta'
 
-const kcal = (n: number) => `${n.toLocaleString('es-CL')} kcal`
 /** 450 → "7 h 30 min", 45 → "45 min", 120 → "2 h" */
 const duracion = (minutos: number) => {
   const h = Math.floor(minutos / 60)
@@ -269,14 +271,28 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
       )
   }, [historial.data, b.id, b.fecha, b.pesoKg, b.tallaCm, b.antropometria, fechaValida, paciente])
   const informe = { datos: datosAntropometria, paciente, fecha: b.fecha, edadMeses: meses, enfermedades: b.enfermedades, evolucion }
-  const enInforme = pestana === 'penta' || pestana === 'bi'
+  // Informes, alimentación y pauta usan el ancho completo, sin el panel lateral del gasto.
+  const anchoCompleto = ['penta', 'bi', 'alimentacion', 'pauta', 'entrega'].includes(pestana ?? '')
   // Sin cambios pendientes se muestra el resultado congelado al guardar; editando, el cálculo en vivo.
   const sinCambios = JSON.stringify(b) === guardado
   useCambiosPendientes(!sinCambios)
   const congelado = sinCambios ? inicial.gasto : null
-  const r = congelado ?? calculo.resultado
-  const signo = { deficit: -1, normo: 0, superavit: 1 }[b.objetivoCalorico]
-  const meta = r ? Math.round(r.promedio * (1 + (signo * b.ajustePct) / 100)) : 0
+  const r = congelado ?? calculo.resultado ?? null
+  const objetivo = { objetivo: b.objetivoCalorico, ajustePct: b.ajustePct }
+  const cambiarObjetivo = (o: typeof objetivo) => cambiar({ objetivoCalorico: o.objetivo, ajustePct: o.ajustePct })
+  const requerimientos = r && b.pesoKg ? requerimientosSemana(r, objetivo, b.pesoKg, b.pauta) : null
+  const requerimientoPromedio =
+    requerimientos && b.pesoKg
+      ? requerimientoDia({ kcal: requerimientos.reduce((s, x) => s + x.kcal, 0) / 7, pesoKg: b.pesoKg, protGKg: b.pauta.protGKg, lipGKg: b.pauta.lipGKg })
+      : null
+
+  /** Copia el recordatorio al lunes de la pauta (macro GUARDAR de 24H-REQ) para planificar desde lo que el paciente ya come. */
+  function usarRecordatorio() {
+    if (b.pauta.dias[0].length && !window.confirm('El lunes de la pauta ya tiene comidas. ¿Reemplazarlas por el recordatorio?')) return
+    const lunes = b.recordatorio.comidas.map(({ tiempo, hora, porciones }) => ({ tiempo, hora, porciones: { ...porciones }, idea: '' }))
+    cambiar({ pauta: { ...b.pauta, dias: b.pauta.dias.map((d, i) => (i === 0 ? lunes : d)) } })
+    setPestana('pauta')
+  }
 
   function volver() {
     if (sinCambios || window.confirm('Hay cambios sin guardar. ¿Salir sin guardarlos?')) navegar(`/pacientes/${paciente.id}`)
@@ -284,7 +300,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
 
   return (
     <Stack>
-      <Group justify="space-between">
+      <Group justify="space-between" data-no-imprimir>
         <div>
           <Title order={2}>Control del {fechaValida ? fechaCL(b.fecha) : '—'}</Title>
           <Text c="dimmed">
@@ -314,17 +330,56 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
       {(guardar.error ?? descartar.error) && <Alert color="red">{(guardar.error ?? descartar.error)!.message}</Alert>}
 
       <Grid>
-        <Grid.Col span={{ base: 12, lg: enInforme ? 12 : 8 }}>
+        <Grid.Col span={{ base: 12, lg: anchoCompleto ? 12 : 8 }}>
           <Stack>
             <Tabs value={pestana} onChange={setPestana} variant="outline">
-              <Tabs.List>
+              <Tabs.List data-no-imprimir>
                 <Tabs.Tab value="rutina">Rutina y gasto</Tabs.Tab>
                 <Tabs.Tab value="antropometria">Antropometría</Tabs.Tab>
                 <Tabs.Tab value="penta">Pentacompartimental</Tabs.Tab>
                 <Tabs.Tab value="bi">Bicompartimental</Tabs.Tab>
+                <Tabs.Tab value="alimentacion">Alimentación</Tabs.Tab>
+                <Tabs.Tab value="pauta">Pauta</Tabs.Tab>
+                <Tabs.Tab value="entrega">Entrega</Tabs.Tab>
                 <Tabs.Tab value="notas">Motivo y notas</Tabs.Tab>
                 <Tabs.Tab value="historial">Historial médico</Tabs.Tab>
               </Tabs.List>
+
+              <Tabs.Panel value="alimentacion" pt="md">
+                <PestanaRecordatorio
+                  valor={b.recordatorio}
+                  onChange={(recordatorio) => cambiar({ recordatorio })}
+                  requerimiento={requerimientoPromedio}
+                  pesoKg={b.pesoKg}
+                  onUsarComoBase={usarRecordatorio}
+                />
+              </Tabs.Panel>
+
+              <Tabs.Panel value="pauta" pt="md">
+                <ArmadorPauta
+                  pauta={b.pauta}
+                  onChange={(pauta) => cambiar({ pauta })}
+                  gasto={r}
+                  pesoKg={b.pesoKg}
+                  objetivo={objetivo}
+                  onCambiarObjetivo={cambiarObjetivo}
+                  fecha={b.fecha}
+                  preferencia={paciente.preferencia}
+                />
+              </Tabs.Panel>
+
+              <Tabs.Panel value="entrega" pt="md">
+                <PautaPaciente
+                  paciente={paciente}
+                  fecha={b.fecha}
+                  edadMeses={meses}
+                  datos={datosAntropometria}
+                  evolucion={evolucion}
+                  pauta={b.pauta}
+                  requerimientos={requerimientos}
+                  sinGuardar={!sinCambios}
+                />
+              </Tabs.Panel>
 
               <Tabs.Panel value="antropometria" pt="md">
                 <Stack>
@@ -677,7 +732,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
           </Stack>
         </Grid.Col>
 
-        <Grid.Col span={{ base: 12, lg: 4 }} display={enInforme ? 'none' : undefined}>
+        <Grid.Col span={{ base: 12, lg: 4 }} display={anchoCompleto ? 'none' : undefined}>
           {pestana === 'antropometria' && (
             <Paper withBorder p="md" mb="md">
               <Title order={4} mb="sm">
@@ -802,42 +857,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
             <Title order={4} mb="sm">
               Objetivo calórico
             </Title>
-            <SegmentedControl
-              fullWidth
-              data={[
-                { value: 'deficit', label: 'Déficit' },
-                { value: 'normo', label: 'Normocalórico' },
-                { value: 'superavit', label: 'Superávit' }
-              ]}
-              value={b.objetivoCalorico}
-              onChange={(v) => cambiar({ objetivoCalorico: v as Borrador['objetivoCalorico'], ajustePct: v === 'normo' ? 0 : b.ajustePct })}
-            />
-            <NumberInput
-              mt="sm"
-              label="Porcentaje respecto al GET"
-              suffix=" %"
-              allowDecimal={false}
-              allowNegative={false}
-              max={50}
-              disabled={b.objetivoCalorico === 'normo'}
-              value={b.ajustePct}
-              onChange={(v) => cambiar({ ajustePct: Number(v) })}
-            />
-            {r && (
-              <Stack gap="sm" mt="md">
-                <Text>
-                  Meta: <b>{kcal(meta)}/día</b>
-                  <Text span c="dimmed" size="sm">
-                    {' '}
-                    ·{' '}
-                    {signo === 0
-                      ? 'igual al GET'
-                      : `GET ${signo < 0 ? '−' : '+'} ${b.ajustePct} % (${kcal(Math.abs(meta - r.promedio))})`}
-                  </Text>
-                </Text>
-                {meta < r.tmb && <Alert color="yellow">La meta queda bajo la TMB ({kcal(r.tmb)})</Alert>}
-              </Stack>
-            )}
+            <PanelObjetivo {...objetivo} gasto={r} onChange={cambiarObjetivo} />
           </Paper>
         </Grid.Col>
       </Grid>

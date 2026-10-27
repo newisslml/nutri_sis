@@ -1,0 +1,27 @@
+/* PDF de la pauta (pauta.tsx, printToPDF): solo el contenido de la pestaña Entrega, en A4. */
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  /* Mantine mide todo en rem: bajar la fuente base achica la pauta completa y ahorra páginas. */
+  html {
+    font-size: 12px;
+  }
+  .mantine-AppShell-header,
+  [data-no-imprimir] {
+    display: none !important;
+  }
+  .mantine-AppShell-main {
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+  .pauta-salto {
+    break-before: page;
+  }
+  .pauta-bloque,
+  tr {
+    break-inside: avoid;
+  }
+}

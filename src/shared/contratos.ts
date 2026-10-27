@@ -2,6 +2,7 @@
 import { z } from 'zod'
 import { GRUPOS, type Medidas } from '../calculo/antropometria'
 import { ADICIONAL, type EntradaGasto, type EstadoFisiologico, type ResultadoGasto } from '../calculo/gasto'
+import { CODIGOS } from '../calculo/intercambio'
 import { edadEnAnios, formatearRut, hoyISO, validarRut } from './validaciones'
 
 z.config(z.locales.es())
@@ -118,6 +119,49 @@ const medidas = z.object(
   )
 ) as unknown as z.ZodType<Medidas, Medidas>
 
+// Porciones de intercambio por código de grupo; media porción es habitual. Un valor borrado queda undefined, como en medidas.
+const porciones = z.partialRecord(z.enum(CODIGOS), z.number().min(0, 'Las porciones no pueden ser negativas').max(20, 'Máximo 20 porciones por grupo').optional())
+const tiempoComida = {
+  tiempo: z.string().trim().min(1, 'Indique el tiempo de comida de cada fila'),
+  hora: z.string().regex(/^(\d{2}:\d{2})?$/, 'Hora inválida'),
+  porciones
+}
+const recordatorio = z.object({
+  comidas: z.array(z.object({ ...tiempoComida, alimentos: z.string().trim() })),
+  noConsume: z.array(z.enum(CODIGOS))
+})
+export type Recordatorio = z.output<typeof recordatorio>
+export type ComidaRecordatorio = Recordatorio['comidas'][number]
+
+// Recomendaciones y suplementos se guardan como texto copiado: el control no cambia si después se edita el catálogo.
+const pauta = z.object({
+  protGKg: z.number().min(0).max(4, 'Proteínas: máximo 4 g/kg'),
+  lipGKg: z.number().min(0).max(3, 'Lípidos: máximo 3 g/kg'),
+  semanasProximo: z.union([z.literal(4), z.literal(6), z.literal(8)]),
+  objetivo: z.string().trim(),
+  regimen: z.array(z.string()),
+  metas: z.string().trim(),
+  recomendaciones: z.array(z.string()),
+  comentario: z.string().trim(),
+  suplementos: z.array(z.object({ producto: z.string().trim().min(1, 'Elija el producto de cada suplemento'), dosis: z.string().trim() })),
+  dias: z.array(z.array(z.object({ ...tiempoComida, idea: z.string().trim() }))).length(7)
+})
+export type Pauta = z.output<typeof pauta>
+export type ComidaPauta = Pauta['dias'][number][number]
+/** Pauta de un control sin datos: 1,8 y 0,5 g/kg como la hoja 24H-REQ (B50 y B55) hasta que Fabi defina otros. */
+export const pautaVacia = (): Pauta => ({
+  protGKg: 1.8,
+  lipGKg: 0.5,
+  semanasProximo: 6,
+  objetivo: '',
+  regimen: [],
+  metas: '',
+  recomendaciones: [],
+  comentario: '',
+  suplementos: [],
+  dias: [[], [], [], [], [], [], []]
+})
+
 export const controlGuardar = z.object({
   id: z.number().int().positive(),
   fecha: fecha.refine((f) => f <= hoyISO(), 'La fecha no puede ser futura'),
@@ -140,7 +184,9 @@ export const controlGuardar = z.object({
   medicamentos: z.string().trim(),
   examenes: z.array(examen),
   antropometria: medidas,
-  semana: z.array(z.array(bloqueRutina)).length(7)
+  semana: z.array(z.array(bloqueRutina)).length(7),
+  recordatorio,
+  pauta
 })
 export type ControlGuardar = z.output<typeof controlGuardar>
 export type Control = Omit<ControlGuardar, 'pesoKg'> & {
@@ -190,11 +236,12 @@ export const entradas = {
   'controles.evolucion': z.object({ pacienteId: z.number().int().positive() }),
   'controles.obtener': z.object({ id: z.number().int().positive() }),
   'controles.descartar': z.object({ id: z.number().int().positive() }),
-  'controles.guardar': controlGuardar
+  'controles.guardar': controlGuardar,
+  'archivos.guardarPdf': z.object({ nombre: z.string().trim().min(1) })
 }
 
 export type Salidas = {
-  'sesion.estado': { configurada: boolean; abierta: boolean }
+  'sesion.estado': { configurada: boolean; abierta: boolean; profesional: string | null }
   'sesion.configurar': { claveRecuperacion: string }
   'sesion.desbloquear': null
   'sesion.bloquear': null
@@ -208,6 +255,7 @@ export type Salidas = {
   'controles.obtener': Control
   'controles.descartar': null
   'controles.guardar': Control
+  'archivos.guardarPdf': string | null // ruta del PDF, o null si se canceló
 }
 
 export type Canal = keyof typeof entradas

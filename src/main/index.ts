@@ -1,5 +1,5 @@
 // Backend: proceso principal de Electron. Único que toca el disco y la base de datos.
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ZodError, type z } from 'zod'
@@ -40,10 +40,10 @@ function mensajeError(e: unknown): string {
   return mensaje
 }
 
-function manejar<C extends Canal>(canal: C, fn: (entrada: z.output<(typeof entradas)[C]>) => Salidas[C]): void {
-  ipcMain.handle(canal, (_evento, crudo): Respuesta<Salidas[C]> => {
+function manejar<C extends Canal>(canal: C, fn: (entrada: z.output<(typeof entradas)[C]>) => Salidas[C] | Promise<Salidas[C]>): void {
+  ipcMain.handle(canal, async (_evento, crudo): Promise<Respuesta<Salidas[C]>> => {
     try {
-      return { ok: true, datos: fn(entradas[canal].parse(crudo) as z.output<(typeof entradas)[C]>) }
+      return { ok: true, datos: await fn(entradas[canal].parse(crudo) as z.output<(typeof entradas)[C]>) }
     } catch (e) {
       console.error(canal, e)
       return { ok: false, error: mensajeError(e) }
@@ -51,7 +51,11 @@ function manejar<C extends Canal>(canal: C, fn: (entrada: z.output<(typeof entra
   })
 }
 
-manejar('sesion.estado', () => ({ configurada: existsSync(RUTA_DB), abierta: db !== null }))
+manejar('sesion.estado', () => ({
+  configurada: existsSync(RUTA_DB),
+  abierta: db !== null,
+  profesional: db ? (db.prepare('SELECT nombre FROM profesional WHERE id = ?').get(profesionalId) as { nombre: string }).nombre : null
+}))
 
 manejar('sesion.configurar', ({ nombreProfesional, contrasena }) => {
   if (existsSync(RUTA_DB)) throw new Error('Ya existe una base de datos en este equipo')
@@ -93,6 +97,18 @@ manejar('controles.descartar', ({ id }) => {
   return null
 })
 manejar('controles.guardar', (c) => controles.guardar(base(), c, profesionalId))
+
+/** Guarda la ventana actual en PDF (lo que no se imprime lo oculta el CSS @media print de la pantalla). */
+manejar('archivos.guardarPdf', async ({ nombre }) => {
+  const ventana = BrowserWindow.getAllWindows()[0]
+  const { canceled, filePath } = await dialog.showSaveDialog(ventana, {
+    defaultPath: join(app.getPath('documents'), `${nombre.replace(/[\\/:*?"<>|]/g, '-')}.pdf`),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }]
+  })
+  if (canceled || !filePath) return null
+  writeFileSync(filePath, await ventana.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }))
+  return filePath
+})
 
 function crearVentana(): void {
   const ventana = new BrowserWindow({
