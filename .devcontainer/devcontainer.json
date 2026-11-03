@@ -1,0 +1,19 @@
+// Entorno de desarrollo en Docker: VS Code "Dev Containers" (con Docker Desktop) o GitHub Codespaces.
+// La ventana de Electron se ve en el escritorio noVNC del puerto 6080 (contraseña: vscode).
+{
+  "name": "Sistema Nutri",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+  "features": {
+    // Escritorio Fluxbox + noVNC; trae las librerías gráficas que Electron necesita (nss, gbm, gtk, alsa).
+    "ghcr.io/devcontainers/features/desktop-lite:1": {}
+  },
+  // node_modules en un volumen propio: el de Windows trae Electron para win32 y no sirve en Linux.
+  "mounts": ["source=nutri-sis-node-modules,target=${containerWorkspaceFolder}/node_modules,type=volume"],
+  "postCreateCommand": "sudo chown node node_modules && npm ci",
+  // Chromium se cae con los 64 MB de memoria compartida que Docker da por defecto.
+  "runArgs": ["--shm-size=1g"],
+  "forwardPorts": [6080],
+  "portsAttributes": {
+    "6080": { "label": "Escritorio (noVNC)", "onAutoForward": "openBrowser" }
+  }
+}

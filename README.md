@@ -17,6 +17,23 @@ npm run typecheck    # revisión de tipos
 
 La primera vez pide el nombre del profesional y una contraseña, y muestra la **clave de recuperación**: hay que imprimirla, porque es la única forma de abrir los datos si se olvida la contraseña.
 
+### En Docker (cualquier equipo)
+
+`.devcontainer/` arma el entorno de desarrollo en un contenedor Linux con Node 24, sin instalar nada más en el equipo:
+
+- **VS Code + Docker Desktop**: extensión "Dev Containers" → "Reopen in Container".
+- **GitHub Codespaces**: desde el repositorio en GitHub, "Code → Codespaces"; funciona desde el navegador.
+
+Al crearse instala las dependencias (`npm ci`). Dentro del contenedor:
+
+```bash
+npm run dev -- --noSandbox   # Docker no permite el sandbox de Chromium
+```
+
+La ventana se ve en el escritorio del puerto 6080 (`http://localhost:6080`, contraseña `vscode`). `npm test`, `npm run typecheck` y `npm run build` funcionan igual que en Windows.
+
+Los datos que se creen en el contenedor (`~/.config/SistemaNutri`) son solo de prueba y se pierden al reconstruirlo. Los datos reales de pacientes no van al repositorio ni al contenedor.
+
 ## Datos
 
 - `%APPDATA%\SistemaNutri\nutri.db`: base SQLite cifrada (formato SQLCipher 4).
