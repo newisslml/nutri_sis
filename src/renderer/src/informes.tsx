@@ -20,9 +20,10 @@ import {
   riesgoCardiovascular,
   type Clasificacion
 } from '../../calculo/clasificacion'
+import { evaluarPediatria } from '../../calculo/pediatria'
 import type { Paciente } from '../../shared/contratos'
 import { formatearEdad } from '../../shared/validaciones'
-import { BarraClasificacion, COLOR_NIVEL, Dona, GraficoEvolucion, GraficoPhantom, Somatocarta, colorCss, type SerieEvolucion } from './graficos'
+import { BarraClasificacion, COLOR_NIVEL, Dona, EvolucionPorSerie, GraficoPhantom, Somatocarta, colorCss, panel, type PanelEvolucion } from './graficos'
 import { decimal, fechaCL, kilos, puntajeZ } from './formato'
 
 export type PuntoEvolucion = { fecha: string; datos: DatosAntropometria }
@@ -31,6 +32,7 @@ type Props = {
   paciente: Paciente
   fecha: string
   edadMeses: number | null
+  semanaEmbarazo: number | null
   enfermedades: string
   evolucion: PuntoEvolucion[]
 }
@@ -53,14 +55,14 @@ const Dato = ({ titulo, children }: { titulo: string; children: ReactNode }) => 
     </Text>
   </div>
 )
-const Etiqueta = ({ c }: { c: Clasificacion | null }) =>
+const Etiqueta = ({ c, sinDato = 'No aplica a esta edad' }: { c: Clasificacion | null; sinDato?: string }) =>
   c ? (
     <Badge color={COLOR_NIVEL[c.nivel]} variant="light">
       {c.etiqueta}
     </Badge>
   ) : (
     <Text size="sm" c="dimmed" fw={400}>
-      No aplica a esta edad
+      {sinDato}
     </Text>
   )
 const Falta = ({ faltan }: { faltan: string[] }) => (
@@ -69,8 +71,28 @@ const Falta = ({ faltan }: { faltan: string[] }) => (
   </Text>
 )
 
-function Antecedentes({ datos, paciente, fecha, edadMeses, enfermedades }: Omit<Props, 'datos' | 'evolucion'> & { datos: DatosAntropometria }) {
+/** Evaluación con curvas de crecimiento (OMS y norma MINSAL); null desde los 19 años 1 mes. */
+const evaluar = (datos: DatosAntropometria, paciente: Paciente, fecha: string) =>
+  evaluarPediatria({
+    ...datos,
+    nacimiento: paciente.fechaNacimiento,
+    fecha,
+    cabezaCm: datos.medidas.perimetros.cabeza,
+    cinturaCm: datos.medidas.perimetros.cintura,
+    semanasGestacion: paciente.semanasGestacion,
+    pesoNacerG: paciente.pesoNacerG
+  })
+
+function Antecedentes({
+  datos,
+  paciente,
+  fecha,
+  edadMeses,
+  semanaEmbarazo,
+  enfermedades
+}: Omit<Props, 'datos' | 'evolucion'> & { datos: DatosAntropometria }) {
   const imc = datos.pesoKg / (datos.tallaCm / 100) ** 2
+  const ped = evaluar(datos, paciente, fecha)
   return (
     <Paper withBorder p="md">
       <Title order={4}>
@@ -79,6 +101,7 @@ function Antecedentes({ datos, paciente, fecha, edadMeses, enfermedades }: Omit<
       <Text size="sm" c="dimmed">
         {[
           edadMeses !== null && formatearEdad(edadMeses),
+          ped?.edadCorregidaMeses != null && `${formatearEdad(ped.edadCorregidaMeses)} de edad corregida`,
           paciente.sexo === 'F' ? 'Femenino' : 'Masculino',
           fechaCL(fecha),
           paciente.disciplina
@@ -95,19 +118,61 @@ function Antecedentes({ datos, paciente, fecha, edadMeses, enfermedades }: Omit<
         <Dato titulo="Peso">{decimal(datos.pesoKg)} kg</Dato>
         <Dato titulo="Talla">{decimal(datos.tallaCm)} cm</Dato>
         <Dato titulo="IMC">{decimal(imc)} kg/m²</Dato>
-        <Dato titulo="Estado nutricional (OMS)">
-          <Etiqueta c={estadoNutricional(imc, datos.edad)} />
-        </Dato>
+        {ped && !semanaEmbarazo ? (
+          <Dato titulo="Calificación nutricional (MINSAL)">
+            <Etiqueta c={ped.nutricional} sinDato="Talla fuera de la tabla P/T" />
+          </Dato>
+        ) : (
+          <Dato titulo={semanaEmbarazo ? `IMC gestacional (Atalah, semana ${semanaEmbarazo})` : 'Estado nutricional (OMS)'}>
+            <Etiqueta c={estadoNutricional(imc, datos.edad, semanaEmbarazo)} sinDato={semanaEmbarazo ? 'La curva parte en la semana 6' : undefined} />
+          </Dato>
+        )}
       </SimpleGrid>
+      {ped && (
+        <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md">
+          {ped.indicadores.map((i) => (
+            <Dato key={i.sigla} titulo={`${i.nombre} (${i.sigla})`}>
+              {puntajeZ(i.z)} DE
+            </Dato>
+          ))}
+          <Dato titulo="Calificación estatural (T/E)">
+            <Etiqueta c={ped.estatural} />
+          </Dato>
+          {ped.cefalico && (
+            <Dato titulo="Perímetro cefálico (PCe/E)">
+              <Etiqueta c={ped.cefalico} />
+            </Dato>
+          )}
+          {ped.cintura && (
+            <Dato titulo="Perímetro de cintura (PC/E)">
+              <Etiqueta c={ped.cintura} />
+            </Dato>
+          )}
+        </SimpleGrid>
+      )}
     </Paper>
   )
 }
 
 /** Indicadores comunes a ambos informes más los propios de cada uno. */
-function Indicadores({ datos, extra }: { datos: DatosAntropometria; extra: [string, ReactNode][] }) {
+/** angosto: va en media pantalla, al lado de otra sección, con dos columnas de datos en vez de tres. */
+function Indicadores({
+  datos,
+  paciente,
+  fecha,
+  extra,
+  angosto = false
+}: {
+  datos: DatosAntropometria
+  paciente: Paciente
+  fecha: string
+  extra: [string, ReactNode][]
+  angosto?: boolean
+}) {
   const { cintura, cadera } = datos.medidas.perimetros
-  const ideal = pesoIdealKg(datos.tallaCm, datos.sexo)
-  const diferencia = datos.pesoKg - ideal
+  const ped = evaluar(datos, paciente, fecha)
+  const ideal = ped ? (ped.pesoIdeal?.kg ?? null) : pesoIdealKg(datos.tallaCm, datos.sexo)
+  const diferencia = datos.pesoKg - (ideal ?? 0)
   const filas: [string, ReactNode][] = [
     [
       'Riesgo cardiovascular (OMS, cintura)',
@@ -124,14 +189,19 @@ function Indicadores({ datos, extra }: { datos: DatosAntropometria; extra: [stri
         </Group>
       )
     ],
-    ['Peso ideal (OMS)', `${kilos(ideal)} kg (${diferencia > 0 ? '+' : diferencia < 0 ? '−' : '±'}${kilos(Math.abs(diferencia))} kg)`],
+    [
+      ped ? `Peso ideal (mediana ${ped.pesoIdeal?.segun ?? 'P/T'})` : 'Peso ideal (OMS)',
+      ideal === null
+        ? 'talla fuera de la tabla P/T'
+        : `${kilos(ideal)} kg (${diferencia > 0 ? '+' : diferencia < 0 ? '−' : '±'}${kilos(Math.abs(diferencia))} kg)`
+    ],
     ['Índice cintura/cadera', cintura !== undefined && cadera !== undefined ? kilos(cintura / cadera) : 'falta cintura o cadera'],
     ['Σ 6 pliegues', sumaMm(datos, PLIEGUES_6)],
     ...extra
   ]
   return (
     <Seccion titulo="Clasificaciones e indicadores">
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+      <SimpleGrid cols={angosto ? { base: 1, sm: 2 } : { base: 1, sm: 2, lg: 3 }}>
         {filas.map(([titulo, valor]) => (
           <Dato key={titulo} titulo={titulo}>
             {valor}
@@ -147,7 +217,39 @@ const sumaMm = (d: DatosAntropometria, sitios: typeof PLIEGUES_6) => {
   return 'mm' in s ? `${decimal(s.mm)} mm` : `faltan ${s.faltan.length}`
 }
 
-function Evolucion({ puntos, series }: { puntos: PuntoEvolucion[]; series: SerieEvolucion[] }) {
+// Perímetros que se siguen control a control (los más usados para ver cambios de masa muscular y grasa).
+const PERIMETROS_EVOLUCION = [
+  ['brazoContraido', 'Brazo contraído', 'red.6'],
+  ['cintura', 'Cintura', 'grape.6'],
+  ['cadera', 'Cadera', 'teal.6'],
+  ['musloMedio', 'Muslo medio', 'blue.6'],
+  ['pantorrilla', 'Pantorrilla', 'orange.6']
+] as const
+
+/** Paneles de medidas directas, comunes a ambos informes: Σ 6 pliegues y perímetros. */
+const panelesMedidas = (puntos: PuntoEvolucion[]): PanelEvolucion[] => [
+  panel(
+    'Σ 6 pliegues',
+    'green.6',
+    puntos.map((p) => {
+      const s = sumaPliegues(p.datos.medidas, PLIEGUES_6)
+      return 'mm' in s ? s.mm : null
+    }),
+    'mm'
+  ),
+  {
+    titulo: 'Perímetros',
+    unidad: 'cm',
+    paso: 10,
+    series: PERIMETROS_EVOLUCION.map(([sitio, nombre, color]) => ({
+      nombre,
+      color,
+      valores: puntos.map((p) => p.datos.medidas.perimetros[sitio] ?? null)
+    })).filter((s) => s.valores.some((v) => v !== null))
+  }
+]
+
+function Evolucion({ puntos, paneles }: { puntos: PuntoEvolucion[]; paneles: PanelEvolucion[] }) {
   return (
     <Seccion titulo="Evolución por control">
       {puntos.length < 2 ? (
@@ -155,17 +257,7 @@ function Evolucion({ puntos, series }: { puntos: PuntoEvolucion[]; series: Serie
           La evolución aparece desde el segundo control con peso y talla.
         </Text>
       ) : (
-        <Stack gap="xs">
-          <Group gap="lg">
-            {series.map((s) => (
-              <Group gap={6} key={s.nombre}>
-                <ColorSwatch size={12} color={colorCss(s.color)} />
-                <Text size="sm">{s.nombre}</Text>
-              </Group>
-            ))}
-          </Group>
-          <GraficoEvolucion fechas={puntos.map((p) => p.fecha)} series={series} />
-        </Stack>
+        <EvolucionPorSerie fechas={puntos.map((p) => p.fecha)} paneles={paneles} />
       )}
     </Seccion>
   )
@@ -255,29 +347,37 @@ export function InformePentacompartimental({ datos, evolucion, ...resto }: Props
           )}
         </Seccion>
       </SimpleGrid>
-      <Seccion titulo="Perfil Phantom (score Z)">
-        <Stack>
-          <GraficoPhantom grupos={perfil} />
-          <Text size="sm" c="dimmed">
-            Cada punto es la distancia, en desviaciones estándar, entre la medida y el Phantom de Ross y Wilson ajustado a la talla del paciente. La franja
-            central es ±1; fuera de ±2 se marca en rojo.
-          </Text>
-        </Stack>
-      </Seccion>
-      <Indicadores
-        datos={datos}
-        extra={[
-          ['Σ 8 pliegues', sumaMm(datos, PLIEGUES_8)],
-          ['Índice músculo/hueso', 'faltan' in k ? 'faltan medidas de Kerr' : kilos(k.resultado.muscular.kg / k.resultado.osea.kg)],
-          ['Índice adiposo/muscular', 'faltan' in k ? 'faltan medidas de Kerr' : kilos(k.resultado.adiposa.kg / k.resultado.muscular.kg)]
-        ]}
-      />
+      <SimpleGrid cols={{ base: 1, md: 2 }}>
+        <Seccion titulo="Perfil Phantom (score Z)">
+          <Stack>
+            <GraficoPhantom grupos={perfil} />
+            <Text size="sm" c="dimmed">
+              Cada punto es la distancia, en desviaciones estándar, entre la medida y el Phantom de Ross y Wilson ajustado a la talla del paciente. La
+              franja central es ±1; fuera de ±2 se marca en rojo.
+            </Text>
+          </Stack>
+        </Seccion>
+        <Indicadores
+          datos={datos}
+          paciente={resto.paciente}
+          fecha={resto.fecha}
+          angosto
+          extra={[
+            ['Σ 8 pliegues', sumaMm(datos, PLIEGUES_8)],
+            ['Índice músculo/hueso', 'faltan' in k ? 'faltan medidas de Kerr' : kilos(k.resultado.muscular.kg / k.resultado.osea.kg)],
+            ['Índice adiposo/muscular', 'faltan' in k ? 'faltan medidas de Kerr' : kilos(k.resultado.adiposa.kg / k.resultado.muscular.kg)]
+          ]}
+        />
+      </SimpleGrid>
       <Evolucion
         puntos={evolucion}
-        series={[
-          { nombre: 'Peso', color: 'blue.6', valores: evolucion.map((p) => p.datos.pesoKg) },
-          { nombre: 'Masa adiposa', color: 'yellow.6', valores: kerrPorPunto((r) => r.adiposa.kg) },
-          { nombre: 'Masa muscular', color: 'red.6', valores: kerrPorPunto((r) => r.muscular.kg) }
+        paneles={[
+          panel('Peso', 'blue.6', evolucion.map((p) => p.datos.pesoKg)),
+          panel('Masa adiposa', 'yellow.6', kerrPorPunto((r) => r.adiposa.kg)),
+          panel('Masa muscular', 'red.6', kerrPorPunto((r) => r.muscular.kg)),
+          ...panelesMedidas(evolucion),
+          panel('Índice adiposo/muscular', 'cyan.6', kerrPorPunto((r) => r.adiposa.kg / r.muscular.kg), '', 0.1),
+          panel('Índice músculo/hueso', 'indigo.6', kerrPorPunto((r) => r.muscular.kg / r.osea.kg), '', 0.1)
         ]}
       />
     </Stack>
@@ -384,6 +484,8 @@ export function InformeBicompartimental({ datos, evolucion, ...resto }: Props) {
       )}
       <Indicadores
         datos={datos}
+        paciente={resto.paciente}
+        fecha={resto.fecha}
         extra={[
           [
             'Índice adiposo/muscular',
@@ -393,10 +495,12 @@ export function InformeBicompartimental({ datos, evolucion, ...resto }: Props) {
       />
       <Evolucion
         puntos={evolucion}
-        series={[
-          { nombre: 'Peso', color: 'blue.6', valores: evolucion.map((p) => p.datos.pesoKg) },
-          { nombre: 'Masa grasa', color: 'yellow.6', valores: biPorPunto((r) => r.grasa.kg) },
-          { nombre: 'Masa muscular', color: 'red.6', valores: biPorPunto((r) => r.muscular.kg) }
+        paneles={[
+          panel('Peso', 'blue.6', evolucion.map((p) => p.datos.pesoKg)),
+          panel('Masa grasa', 'yellow.6', biPorPunto((r) => r.grasa.kg)),
+          panel('Masa muscular', 'red.6', biPorPunto((r) => r.muscular.kg)),
+          ...panelesMedidas(evolucion),
+          panel('Índice adiposo/muscular', 'cyan.6', biPorPunto((r) => r.grasa.kg / r.muscular.kg), '', 0.1)
         ]}
       />
     </Stack>

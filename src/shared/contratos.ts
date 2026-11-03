@@ -61,6 +61,15 @@ export const pacienteEntrada = z
     apellidos: z.string().trim().min(1, 'Requerido'),
     fechaNacimiento: fecha.refine((f) => f <= hoyISO(), 'La fecha no puede ser futura'),
     sexo: z.enum(['F', 'M'], 'Seleccione el sexo'),
+    // Vacíos = nació de término o no se sabe. NumberInput deja '' al borrar.
+    semanasGestacion: z
+      .union([z.literal(''), z.number().int('Semanas cumplidas, sin decimales').min(22, 'Mínimo 22 semanas').max(42, 'Máximo 42 semanas')])
+      .nullable()
+      .transform((v) => (v === '' ? null : v)),
+    pesoNacerG: z
+      .union([z.literal(''), z.number().int('Gramos, sin decimales').min(300, 'Mínimo 300 g').max(6000, 'Máximo 6.000 g')])
+      .nullable()
+      .transform((v) => (v === '' ? null : v)),
     perfil: z.enum(PERFILES, 'Seleccione un perfil'),
     disciplina: z.string().trim(),
     direccion: z.string().trim(),
@@ -87,7 +96,7 @@ export type PacienteGuardar = z.output<typeof pacienteEntrada>
 export type Paciente = Omit<PacienteGuardar, 'id'> & { id: number; consentimientoFecha: string }
 export type PacienteResumen = Pick<Paciente, 'id' | 'rut' | 'fechaNacimiento' | 'sexo' | 'perfil'> & { nombre: string }
 
-export type ActividadMet = { id: number; codigo: string | null; categoria: string; nombre: string; met: number; estimado: boolean }
+export type ActividadMet = { id: number; codigo: string | null; categoria: string; nombre: string; met: number; estimado: boolean; poblacion: string }
 
 const bloqueRutina = z.object({
   actividadId: z.number().int().positive().nullable(),
@@ -173,6 +182,7 @@ export const controlGuardar = z.object({
   metReposo: z.number().min(0.9).max(3),
   eta: z.boolean(),
   estado: z.enum(Object.keys(ADICIONAL) as [EstadoFisiologico, ...EstadoFisiologico[]]).nullable(),
+  semanaEmbarazo: z.number().int('Semanas cumplidas, sin decimales').min(1).max(42, 'Máximo 42 semanas').nullable(),
   tmbManual: z.number().min(300, 'TMB mínima 300 kcal').max(6000, 'TMB máxima 6000 kcal').nullable(),
   objetivoCalorico: z.enum(['deficit', 'normo', 'superavit']),
   ajustePct: z.number().int().min(0).max(50, 'El ajuste calórico máximo es 50 %'),
@@ -237,7 +247,7 @@ export const entradas = {
   'controles.obtener': z.object({ id: z.number().int().positive() }),
   'controles.descartar': z.object({ id: z.number().int().positive() }),
   'controles.guardar': controlGuardar,
-  'archivos.guardarPdf': z.object({ nombre: z.string().trim().min(1) })
+  'archivos.guardarPdf': z.object({ nombre: z.string().trim().min(1), mismaCarpeta: z.boolean().optional() })
 }
 
 export type Salidas = {

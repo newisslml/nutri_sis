@@ -20,6 +20,13 @@ export type EstadoFisiologico = keyof typeof ADICIONAL
 
 export const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
+/** Grupos de edad (años) del compendio juvenil; son la población de sus filas en actividad_met. */
+export const GRUPOS_JUVENILES = ['6-9', '10-12', '13-15', '16-18']
+
+/** Población de la tabla MET que corresponde a la edad: el grupo juvenil (bajo 6 años, el de 6-9), '60+' o 'adulto'. */
+export const poblacionMet = (edad: number) =>
+  edad >= 60 ? '60+' : edad >= 18 ? 'adulto' : GRUPOS_JUVENILES[edad < 10 ? 0 : edad < 13 ? 1 : edad < 16 ? 2 : 3]
+
 export type EntradaGasto = {
   paciente: DatosPaciente
   formulaId: string

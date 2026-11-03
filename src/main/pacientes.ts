@@ -2,7 +2,7 @@ import type { Paciente, PacienteGuardar, PacienteResumen, Perfil } from '../shar
 import { auditar, type DB } from './db'
 
 const SELECT = `SELECT id, rut, nombres, apellidos, fecha_nacimiento AS fechaNacimiento, sexo, perfil, disciplina,
-  direccion, telefono, correo, preferencia, sintomas, tabaco, alcohol,
+  semanas_gestacion AS semanasGestacion, peso_nacer_g AS pesoNacerG, direccion, telefono, correo, preferencia, sintomas, tabaco, alcohol,
   objetivo, tutor_nombre AS tutorNombre, consentimiento_fecha AS consentimientoFecha FROM paciente`
 
 export function listar(db: DB, busqueda: string, perfil: Perfil | null): PacienteResumen[] {
@@ -35,6 +35,8 @@ export function guardar(db: DB, p: PacienteGuardar, profesionalId: number): Paci
     apellidos: p.apellidos,
     fechaNacimiento: p.fechaNacimiento,
     sexo: p.sexo,
+    semanasGestacion: p.semanasGestacion,
+    pesoNacerG: p.pesoNacerG,
     perfil: p.perfil,
     disciplina: p.disciplina,
     direccion: p.direccion,
@@ -48,17 +50,18 @@ export function guardar(db: DB, p: PacienteGuardar, profesionalId: number): Paci
     tutorNombre: p.tutorNombre
   }
   const columnas = `rut = @rut, nombres = @nombres, apellidos = @apellidos, fecha_nacimiento = @fechaNacimiento,
-    sexo = @sexo, perfil = @perfil, disciplina = @disciplina, direccion = @direccion, telefono = @telefono, correo = @correo,
+    sexo = @sexo, semanas_gestacion = @semanasGestacion, peso_nacer_g = @pesoNacerG,
+    perfil = @perfil, disciplina = @disciplina, direccion = @direccion, telefono = @telefono, correo = @correo,
     preferencia = @preferencia, sintomas = @sintomas, tabaco = @tabaco, alcohol = @alcohol, objetivo = @objetivo,
     tutor_nombre = @tutorNombre`
 
   if (p.id === undefined) {
     const { lastInsertRowid } = db
       .prepare(
-        `INSERT INTO paciente (profesional_id, consentimiento_fecha, rut, nombres, apellidos, fecha_nacimiento, sexo, perfil,
-           disciplina, direccion, telefono, correo, preferencia, sintomas, tabaco, alcohol, objetivo, tutor_nombre)
-         VALUES (@profesionalId, date('now', 'localtime'), @rut, @nombres, @apellidos, @fechaNacimiento, @sexo, @perfil,
-           @disciplina, @direccion, @telefono, @correo, @preferencia, @sintomas, @tabaco, @alcohol, @objetivo, @tutorNombre)`
+        `INSERT INTO paciente (profesional_id, consentimiento_fecha, rut, nombres, apellidos, fecha_nacimiento, sexo, semanas_gestacion, peso_nacer_g,
+           perfil, disciplina, direccion, telefono, correo, preferencia, sintomas, tabaco, alcohol, objetivo, tutor_nombre)
+         VALUES (@profesionalId, date('now', 'localtime'), @rut, @nombres, @apellidos, @fechaNacimiento, @sexo, @semanasGestacion, @pesoNacerG,
+           @perfil, @disciplina, @direccion, @telefono, @correo, @preferencia, @sintomas, @tabaco, @alcohol, @objetivo, @tutorNombre)`
       )
       .run({ ...campos, profesionalId })
     return obtener(db, Number(lastInsertRowid))

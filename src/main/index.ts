@@ -1,7 +1,7 @@
 // Backend: proceso principal de Electron. Único que toca el disco y la base de datos.
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { ZodError, type z } from 'zod'
 import { entradas, type Canal, type Respuesta, type Salidas } from '../shared/contratos'
 import { claveATexto, desenvolver, envolver, nuevaClave, textoAClave, type Envoltura } from './claves'
@@ -98,16 +98,25 @@ manejar('controles.descartar', ({ id }) => {
 })
 manejar('controles.guardar', (c) => controles.guardar(base(), c, profesionalId))
 
+// Carpeta del último PDF guardado: el siguiente diálogo parte ahí y mismaCarpeta guarda sin preguntar.
+let carpetaPdf: string | null = null
+
 /** Guarda la ventana actual en PDF (lo que no se imprime lo oculta el CSS @media print de la pantalla). */
-manejar('archivos.guardarPdf', async ({ nombre }) => {
+manejar('archivos.guardarPdf', async ({ nombre, mismaCarpeta }) => {
   const ventana = BrowserWindow.getAllWindows()[0]
-  const { canceled, filePath } = await dialog.showSaveDialog(ventana, {
-    defaultPath: join(app.getPath('documents'), `${nombre.replace(/[\\/:*?"<>|]/g, '-')}.pdf`),
-    filters: [{ name: 'PDF', extensions: ['pdf'] }]
-  })
-  if (canceled || !filePath) return null
-  writeFileSync(filePath, await ventana.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }))
-  return filePath
+  const archivo = `${nombre.replace(/[\\/:*?"<>|]/g, '-')}.pdf`
+  let ruta = mismaCarpeta && carpetaPdf ? join(carpetaPdf, archivo) : null
+  if (!ruta) {
+    const { canceled, filePath } = await dialog.showSaveDialog(ventana, {
+      defaultPath: join(carpetaPdf ?? app.getPath('documents'), archivo),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    })
+    if (canceled || !filePath) return null
+    ruta = filePath
+    carpetaPdf = dirname(filePath)
+  }
+  writeFileSync(ruta, await ventana.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }))
+  return ruta
 })
 
 function crearVentana(): void {

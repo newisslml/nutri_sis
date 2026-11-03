@@ -6,6 +6,7 @@ import {
   Fieldset,
   Group,
   Loader,
+  NumberInput,
   Select,
   SimpleGrid,
   Stack,
@@ -34,7 +35,7 @@ import {
   type PacienteFormulario,
   type Perfil
 } from '../../shared/contratos'
-import { edadEnAnios, hoyISO } from '../../shared/validaciones'
+import { edadEnAnios, edadEnMeses, hoyISO } from '../../shared/validaciones'
 import { llamar, useCambiosPendientes, validarCon } from './api'
 import { ListaControles } from './controles'
 import { Grupo, UsuarioMas } from './iconos'
@@ -157,6 +158,8 @@ const VACIO: Valores = {
   apellidos: '',
   fechaNacimiento: '',
   sexo: null,
+  semanasGestacion: '',
+  pesoNacerG: '',
   perfil: null,
   disciplina: '',
   direccion: '',
@@ -175,7 +178,9 @@ function FormularioPaciente({ inicial }: { inicial?: Paciente }) {
   const qc = useQueryClient()
   const navegar = useNavigate()
   const form = useForm<Valores>({
-    initialValues: inicial ? { ...inicial, rut: inicial.rut ?? '' } : VACIO,
+    initialValues: inicial
+      ? { ...inicial, rut: inicial.rut ?? '', semanasGestacion: inicial.semanasGestacion ?? '', pesoNacerG: inicial.pesoNacerG ?? '' }
+      : VACIO,
     validate: validarCon(pacienteEntrada)
   })
   useCambiosPendientes(form.isDirty())
@@ -189,6 +194,8 @@ function FormularioPaciente({ inicial }: { inicial?: Paciente }) {
   })
   const f = form.values.fechaNacimiento
   const menor = /^\d{4}-\d{2}-\d{2}$/.test(f) && edadEnAnios(f, hoyISO()) < 18
+  // La edad corregida de un prematuro se usa hasta los 24 meses corregidos: después estos datos no cambian nada.
+  const lactante = menor && edadEnMeses(f, hoyISO()) < 36
 
   return (
     <form onSubmit={form.onSubmit((v) => guardar.mutate(v))}>
@@ -204,6 +211,28 @@ function FormularioPaciente({ inicial }: { inicial?: Paciente }) {
           <TextInput label="Disciplina deportiva" {...form.getInputProps('disciplina')} />
           <Select label="Preferencia alimentaria" data={OPCIONES_PREFERENCIA} clearable {...form.getInputProps('preferencia')} />
           {menor && <TextInput label="Tutor que consiente" withAsterisk {...form.getInputProps('tutorNombre')} />}
+          {lactante && (
+            <NumberInput
+              label="Semanas de gestación al nacer"
+              description="Vacío si nació de término. Bajo 37 semanas, las curvas usan la edad corregida"
+              min={22}
+              max={42}
+              allowDecimal={false}
+              {...form.getInputProps('semanasGestacion')}
+            />
+          )}
+          {lactante && (
+            <NumberInput
+              label="Peso al nacer (g)"
+              description="Bajo 1.500 g cuenta como prematuro extremo (corrige hasta los 24 meses)"
+              min={300}
+              max={6000}
+              allowDecimal={false}
+              thousandSeparator="."
+              decimalSeparator=","
+              {...form.getInputProps('pesoNacerG')}
+            />
+          )}
         </SimpleGrid>
         <Fieldset legend="Contacto">
           <SimpleGrid cols={3}>

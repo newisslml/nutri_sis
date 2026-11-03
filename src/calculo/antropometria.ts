@@ -3,7 +3,12 @@
 import type { Sexo } from './formulas.ts'
 
 export const GRUPOS = {
-  basicos: { titulo: 'Básicos', unidad: 'cm', max: 250, sitios: { tallaSentado: 'Talla sentado', envergadura: 'Envergadura' } },
+  basicos: {
+    titulo: 'Básicos',
+    unidad: 'cm',
+    max: 250,
+    sitios: { tallaSentado: 'Talla sentado', envergadura: 'Envergadura', alturaRodilla: 'Altura de rodilla' }
+  },
   pliegues: {
     titulo: 'Pliegues',
     unidad: 'mm',
@@ -97,6 +102,13 @@ export function sumaPliegues(m: Medidas, sitios: Sitio<'pliegues'>[]): { mm: num
 export const PLIEGUES_4: Sitio<'pliegues'>[] = ['bicipital', 'tricipital', 'subescapular', 'crestaIliaca']
 export const PLIEGUES_6: Sitio<'pliegues'>[] = ['tricipital', 'subescapular', 'supraespinal', 'abdominal', 'musloFrontal', 'pantorrilla']
 export const PLIEGUES_8 = Object.keys(GRUPOS.pliegues.sitios) as Sitio<'pliegues'>[]
+
+/**
+ * Talla (cm) por altura de rodilla, para quien no puede medirse de pie. Fuente: Chumlea WC, Roche AF, Steinbaugh ML.
+ * Estimating stature from knee height for persons 60 to 90 years of age. J Am Geriatr Soc. 1985;33(2):116-20.
+ */
+export const tallaChumlea = (alturaRodillaCm: number, edad: number, sexo: Sexo) =>
+  sexo === 'M' ? 64.19 - 0.04 * edad + 2.02 * alturaRodillaCm : 84.88 - 0.24 * edad + 1.83 * alturaRodillaCm
 
 export type DatosAntropometria = { pesoKg: number; tallaCm: number; edad: number; sexo: Sexo; medidas: Medidas }
 export type Componente = { kg: number; pct: number }

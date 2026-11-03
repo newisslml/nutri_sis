@@ -3,11 +3,16 @@
 import Database from 'better-sqlite3-multiple-ciphers'
 import { copyFileSync, existsSync } from 'node:fs'
 import compendio from '../../MET.md?raw'
+import compendioMayor from '../../MET60.md?raw'
+import compendioJuvenil from '../../METy.md?raw'
+import { GRUPOS_JUVENILES } from '../calculo/gasto'
 import { parsearCompendio } from './compendio'
 
 export type DB = Database.Database
 
 const FUENTE_COMPENDIO = 'Compendio de Actividades Físicas 2011 (Ainsworth BE et al. Med Sci Sports Exerc. 2011;43(8):1575-81)'
+const FUENTE_JUVENIL = 'Compendio Juvenil de Actividades Físicas 2018, METy por modelo (Butte NF et al. Med Sci Sports Exerc. 2018;50(2):246-56)'
+const FUENTE_MAYOR = 'Compendio para Adultos Mayores 2024, MET60+ × 2,7/3,5 (Willis EA et al. J Sport Health Sci. 2024;13(1):13-7)'
 
 const MIGRACIONES: (string | ((db: DB) => void))[] = [
   `CREATE TABLE profesional (
@@ -82,7 +87,9 @@ const MIGRACIONES: (string | ((db: DB) => void))[] = [
       `INSERT INTO actividad_met (codigo, categoria, nombre, met, estimado, fuente)
        VALUES (@codigo, @categoria, @nombre, @met, @estimado, '${FUENTE_COMPENDIO}')`
     )
-    for (const a of parsearCompendio(compendio)) insertar.run({ ...a, estimado: a.estimado ? 1 : 0 })
+    for (const a of parsearCompendio(compendio)) {
+      insertar.run({ codigo: a.codigo, categoria: a.categoria, nombre: a.nombre, met: a.valores[0], estimado: a.estimado ? 1 : 0 })
+    }
   },
   `ALTER TABLE control ADD COLUMN motivo TEXT NOT NULL DEFAULT '';
    ALTER TABLE control ADD COLUMN notas TEXT NOT NULL DEFAULT '';
@@ -106,7 +113,23 @@ const MIGRACIONES: (string | ((db: DB) => void))[] = [
    ALTER TABLE control ADD COLUMN ajuste_pct INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE control ADD COLUMN antropometria TEXT NOT NULL DEFAULT '{}'; -- JSON {grupo: {sitio: valor}}, sitios en calculo/antropometria.ts`,
   `ALTER TABLE control ADD COLUMN recordatorio TEXT NOT NULL DEFAULT '{}'; -- JSON {comidas, noConsume}, esquema en shared/contratos.ts
-   ALTER TABLE control ADD COLUMN pauta TEXT NOT NULL DEFAULT '{}'; -- JSON, porciones con los códigos de calculo/intercambio.ts`
+   ALTER TABLE control ADD COLUMN pauta TEXT NOT NULL DEFAULT '{}'; -- JSON, porciones con los códigos de calculo/intercambio.ts`,
+  (db) => {
+    const insertar = db.prepare('INSERT INTO actividad_met (codigo, categoria, nombre, met, poblacion, fuente) VALUES (?, ?, ?, ?, ?, ?)')
+    // Juvenil: una fila por grupo de edad, con el código de la tabla más el dígito del grupo (2 = 6-9 años … 5 = 16-18).
+    for (const a of parsearCompendio(compendioJuvenil)) {
+      a.valores.forEach((met, i) => met !== null && insertar.run(`${a.codigo}${i + 2}`, a.categoria, a.nombre, met, GRUPOS_JUVENILES[i], FUENTE_JUVENIL))
+    }
+    // MET60+ toma 2,7 mL/kg/min como reposo; se guarda en MET estándar (3,5) para sumarse como el resto de la tabla.
+    for (const a of parsearCompendio(compendioMayor)) {
+      const met60 = a.valores[0]!
+      const nombre = `${a.nombre} (MET60+ ${met60.toFixed(1).replace('.', ',')})`
+      insertar.run(a.codigo, a.categoria, nombre, Math.round((met60 * 270) / 3.5) / 100, '60+', FUENTE_MAYOR)
+    }
+  },
+  `ALTER TABLE paciente ADD COLUMN semanas_gestacion INTEGER; -- al nacer; bajo 37 las curvas usan la edad corregida
+   ALTER TABLE paciente ADD COLUMN peso_nacer_g INTEGER;`,
+  'ALTER TABLE control ADD COLUMN semana_embarazo INTEGER; -- semanas cumplidas de la gestación en curso, para la curva de Atalah'
 ]
 
 /** Registra en auditoría cada campo cuyo valor cambió, con quién y cuándo. */

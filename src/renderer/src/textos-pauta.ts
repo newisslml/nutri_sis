@@ -410,95 +410,114 @@ export const MEDIDAS_CASERAS = [
 
 type Dieta = 'omnivoro' | 'vegetariano' | 'vegano'
 export type Preparacion = { tipo: string; dieta: Dieta; nombre: string }
-const lista = (tipo: string, dieta: Dieta, nombres: string[]): Preparacion[] => nombres.map((nombre) => ({ tipo, dieta, nombre }))
+/** El nombre lleva sus porciones de intercambio: "Aliado (pan de molde + jamón + queso) — 1 CER · 1 CBG · 1 LAG". */
+const lista = (tipo: string, dieta: Dieta, filas: [string, string][]): Preparacion[] =>
+  filas.map(([nombre, porciones]) => ({ tipo, dieta, nombre: porciones ? `${nombre} — ${porciones}` : nombre }))
 
-/** "Lista de preparaciones" de la hoja FORMS (K94:K188), para las ideas rápidas de cada comida. */
+/**
+ * "Lista de preparaciones" de la hoja FORMS (K94:K188), para las ideas rápidas de cada comida. Las porciones (pedidas por Fabi en
+ * la tarjeta #40) son de una porción habitual según las tablas de intercambio de la hoja PLAN; Fabi debe validarlas. Sin porciones = libre.
+ */
 export const PREPARACIONES: Preparacion[] = [
   ...lista('Colaciones', 'omnivoro', [
-    'Leche descremada + hallulla c/ mantequilla y jamón',
-    'Aliado (pan de molde + jamón + queso)',
-    'Pan de molde integral c/ jamón de pavo',
-    'Leche descremada + tostadas c/ jamón de pavo',
-    'Té + ave palta (pan de molde, pollo desmenuzado, palta)'
+    ['Leche descremada + hallulla c/ mantequilla y jamón', '1 CER · 1 CBG · 1 LBG · 1 AC'],
+    ['Aliado (pan de molde + jamón + queso)', '1 CER · 1 CBG · 1 LAG'],
+    ['Pan de molde integral c/ jamón de pavo', '1 CER · 1 CBG'],
+    ['Leche descremada + tostadas c/ jamón de pavo', '1 CER · 1 CBG · 1 LBG'],
+    ['Té + ave palta (pan de molde, pollo desmenuzado, palta)', '1 CER · 1 CBG · ½ ARL']
   ]),
   ...lista('Colaciones', 'vegetariano', [
-    '1 scoop de whey protein',
-    'Leche descremada',
-    'Leche semidescremada',
-    'Leche en caja light',
-    'Yogurt light',
-    'Yogurt batido normal',
-    'Yogurt protein',
-    'Leche descremada + tostadas c/ huevo',
-    'Yogurt light c/ avena',
-    'Yogurt protein c/ cereal de desayuno',
-    'Omelette (huevo c/ verduras mixtas)',
-    'Infusión o té verde + galletas de salvado c/ quesillo y palta',
-    'Jugo natural + hallulla c/ mermelada y queso',
-    'Panqueques proteicos (huevo y avena)',
-    'Porridge proteico (avena, agua, whey, fruta)',
-    'Muffin de microondas (huevo, avena, fruta, cacao)',
-    'Batido proteico (leche descremada, whey, plátano, maní)',
-    'Galletas de soda o salvado c/ quesillo'
+    ['1 scoop de whey protein', '2 CBG'],
+    ['Leche descremada', '1 LBG'],
+    ['Leche semidescremada', '1 LMG'],
+    ['Leche en caja light', '1 LBG'],
+    ['Yogurt light', '1 LBG'],
+    ['Yogurt batido normal', '1 LAG'],
+    ['Yogurt protein', '2 LBG'],
+    ['Leche descremada + tostadas c/ huevo', '1 CER · 1 CBG · 1 LBG'],
+    ['Yogurt light c/ avena', '1 CER · 1 LBG'],
+    ['Yogurt protein c/ cereal de desayuno', '1 CER · 2 LBG'],
+    ['Omelette (huevo c/ verduras mixtas)', '1 VG · 2 CBG'],
+    ['Infusión o té verde + galletas de salvado c/ quesillo y palta', '1 CER · 1 LMG · ½ ARL'],
+    ['Jugo natural + hallulla c/ mermelada y queso', '1 CER · 1 FRT · 1 LAG · 1 AZ'],
+    ['Panqueques proteicos (huevo y avena)', '1 CER · 1 CBG'],
+    ['Porridge proteico (avena, agua, whey, fruta)', '1 CER · 1 FRT · 2 CBG'],
+    ['Muffin de microondas (huevo, avena, fruta, cacao)', '1 CER · 1 FRT · 1 CBG'],
+    ['Batido proteico (leche descremada, whey, plátano, maní)', '1 FRT · 2 CBG · 1 LBG · ½ ARL'],
+    ['Galletas de soda o salvado c/ quesillo', '1 CER · 1 LMG']
   ]),
   ...lista('Colaciones', 'vegano', [
-    'Café',
-    'Té',
-    'Infusión de hierbas',
-    'Fruta',
-    'Jugo de fruta natural',
-    'Almendras',
-    'Maní sin sal',
-    'Maní salado',
-    'Cereal de desayuno (corn flakes, Chocapic)',
-    '1 scoop de proteína vegetal',
-    'Yogurt de soya c/ cereal y fruta',
-    'Tostadas c/ tofu revuelto',
-    'Café + porridge de avena (avena, agua tibia, fruta)',
-    'Jugo natural sin azúcar + tostadas c/ palta',
-    'Porridge vegetal (avena, leche de soya, fruta)',
-    'Tostadas c/ palta y hummus',
-    'Smoothie (leche de soya, fruta, proteína vegetal)'
+    ['Café', ''],
+    ['Té', ''],
+    ['Infusión de hierbas', ''],
+    ['Fruta', '1 FRT'],
+    ['Jugo de fruta natural', '1 FRT'],
+    ['Almendras', '1 ARL'],
+    ['Maní sin sal', '1 ARL'],
+    ['Maní salado', '1 ARL'],
+    ['Cereal de desayuno (corn flakes, Chocapic)', '1 CER'],
+    ['1 scoop de proteína vegetal', '2 CBG'],
+    ['Yogurt de soya c/ cereal y fruta', '1 CER · 1 FRT · 1 LBG'],
+    ['Tostadas c/ tofu revuelto', '1 CER · 1 CBG'],
+    ['Café + porridge de avena (avena, agua tibia, fruta)', '1 CER · 1 FRT'],
+    ['Jugo natural sin azúcar + tostadas c/ palta', '1 CER · 1 FRT · ½ ARL'],
+    ['Porridge vegetal (avena, leche de soya, fruta)', '1 CER · 1 FRT · 1 LMG'],
+    ['Tostadas c/ palta y hummus', '1 CER · ½ CBG · ½ ARL'],
+    ['Smoothie (leche de soya, fruta, proteína vegetal)', '1 FRT · 2 CBG · 1 LMG']
   ]),
-  ...lista('Ensaladas y entradas', 'vegetariano', ['Ensalada mixta: choclo, tomate, quesillo', 'Ensalada de lechuga y huevo']),
+  ...lista('Ensaladas y entradas', 'vegetariano', [
+    ['Ensalada mixta: choclo, tomate, quesillo', '½ CER · 1 VG · 1 LMG'],
+    ['Ensalada de lechuga y huevo', '1 VLC · 1 CBG']
+  ]),
   ...lista('Ensaladas y entradas', 'vegano', [
-    'Ensalada de espinaca y tomate',
-    'Ensalada de lechuga y tomate',
-    'Ensalada de apio y zanahoria',
-    'Ensalada de betarraga y brócoli',
-    'Ensalada chilena',
-    'Ensalada de apio y palta',
-    'Ensalada de habas y cebolla',
-    'Ensalada de lechuga y pimentón rojo',
-    'Ensalada de porotos verdes y cebolla',
-    'Ensalada de champiñones y cebolla',
-    'Ensalada de choclo y tomate',
-    'Ensalada de pepino y lechuga',
-    'Ensalada de lechuga y zanahoria',
-    'Crema de zapallo'
+    ['Ensalada de espinaca y tomate', '1 VG · 1 VLC'],
+    ['Ensalada de lechuga y tomate', '1 VG · 1 VLC'],
+    ['Ensalada de apio y zanahoria', '1 VG · 1 VLC'],
+    ['Ensalada de betarraga y brócoli', '2 VG'],
+    ['Ensalada chilena', '1½ VG'],
+    ['Ensalada de apio y palta', '1 VLC · ½ ARL'],
+    ['Ensalada de habas y cebolla', '½ CER · ½ VG'],
+    ['Ensalada de lechuga y pimentón rojo', '2 VLC'],
+    ['Ensalada de porotos verdes y cebolla', '1½ VG'],
+    ['Ensalada de champiñones y cebolla', '1½ VG'],
+    ['Ensalada de choclo y tomate', '½ CER · 1 VG'],
+    ['Ensalada de pepino y lechuga', '2 VLC'],
+    ['Ensalada de lechuga y zanahoria', '1 VG · 1 VLC'],
+    ['Crema de zapallo', '2 VG']
   ]),
   ...lista('Almuerzos y cenas', 'omnivoro', [
-    'Pollo al jugo c/ arroz graneado',
-    'Pasta bolognesa',
-    'Pescado al horno c/ puré',
-    'Chacarero (pan, churrascos, porotos verdes, tomate)',
-    'Tortilla de jurel',
-    'Chapsui de pollo',
-    'Pollo champiñón c/ arroz graneado',
-    'Estofado de carne',
-    'Carne al jugo c/ arroz'
+    ['Pollo al jugo c/ arroz graneado', '2 CER · 3 CBG · 1 AC'],
+    ['Pasta bolognesa', '2 CER · 1 VG · 2 CBG · 1 AC'],
+    ['Pescado al horno c/ puré', '2 CER · 3 CBG · 1 AC'],
+    ['Chacarero (pan, churrascos, porotos verdes, tomate)', '2 CER · 1 VG · 2 CBG · 1 AC'],
+    ['Tortilla de jurel', '½ VG · 3 CBG · 1 AC'],
+    ['Chapsui de pollo', '1 VG · 3 CBG · 1 AC'],
+    ['Pollo champiñón c/ arroz graneado', '2 CER · 1 VG · 3 CBG · 1 AC'],
+    ['Estofado de carne', '1 CER · 1 VG · 3 CBG · 1 AC'],
+    ['Carne al jugo c/ arroz', '2 CER · 3 CBG · 1 AC']
   ]),
-  ...lista('Almuerzos y cenas', 'vegetariano', ['Tortilla de verduras', 'Ensalada surtida, huevo, quesillo, palta']),
+  ...lista('Almuerzos y cenas', 'vegetariano', [
+    ['Tortilla de verduras', '1 VG · 2 CBG · 1 AC'],
+    ['Ensalada surtida, huevo, quesillo, palta', '1 VG · 1 VLC · 1 CBG · 1 LMG · ½ ARL']
+  ]),
   ...lista('Almuerzos y cenas', 'vegano', [
-    'Guiso de porotos c/ riendas',
-    'Pasta bolognesa de soya',
-    'Lentejas c/ arroz',
-    'Fajitas de legumbres',
-    'Ensalada de legumbres',
-    'Tomaticán de soya (soya, tomate, choclo)'
+    ['Guiso de porotos c/ riendas', '1 CER · ½ VG · 2 CBG · 1 AC'],
+    ['Pasta bolognesa de soya', '2 CER · 1 VG · 2 CBG · 1 AC'],
+    ['Lentejas c/ arroz', '1 CER · 2 CBG · 1 AC'],
+    ['Fajitas de legumbres', '2 CER · 1 VG · 2 CBG · 1 AC'],
+    ['Ensalada de legumbres', '1 VG · 2 CBG · 1 AC'],
+    ['Tomaticán de soya (soya, tomate, choclo)', '½ CER · 1 VG · 2 CBG · 1 AC']
   ]),
-  ...lista('Postres', 'vegano', ['Manzana', 'Naranja', 'Plátano', 'Kiwis', 'Berries', 'Jalea normal', 'Jalea diet']),
-  ...lista('Postres', 'vegetariano', ['Postre de leche'])
+  ...lista('Postres', 'vegano', [
+    ['Manzana', '1 FRT'],
+    ['Naranja', '1 FRT'],
+    ['Plátano', '2 FRT'],
+    ['Kiwis', '1 FRT'],
+    ['Berries', '1 FRT'],
+    ['Jalea normal', '3 AZ'],
+    ['Jalea diet', '']
+  ]),
+  ...lista('Postres', 'vegetariano', [['Postre de leche', '1 LAG · 2 AZ']])
 ]
 
 /** Qué listas de preparaciones calzan con la preferencia del paciente (sin preferencia: todas). */

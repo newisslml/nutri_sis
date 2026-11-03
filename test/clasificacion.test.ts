@@ -14,8 +14,28 @@ test('estado nutricional por IMC: cada corte pertenece al tramo de arriba', () =
 test('estado nutricional del adulto mayor usa otros cortes y en menores de 18 no aplica', () => {
   assert.equal(estadoNutricional(24, 70)?.etiqueta, 'Normal')
   assert.equal(estadoNutricional(22, 70)?.etiqueta, 'Enflaquecido') // a los 30 años, 22 sería normal
-  assert.equal(estadoNutricional(33, 70)?.etiqueta, 'Obesidad')
+  assert.equal(estadoNutricional(17, 70)?.etiqueta, 'Enflaquecido') // sin tramo "desnutrido" en la tabla de Fabi
+  assert.equal(estadoNutricional(23.04, 70)?.etiqueta, 'Enflaquecido') // ≤ 23,0
+  assert.equal(estadoNutricional(23.1, 70)?.etiqueta, 'Normal')
+  assert.equal(estadoNutricional(27.9, 70)?.etiqueta, 'Normal')
+  assert.equal(estadoNutricional(28, 70)?.etiqueta, 'Sobrepeso')
+  assert.equal(estadoNutricional(31.9, 70)?.etiqueta, 'Sobrepeso')
+  assert.equal(estadoNutricional(32, 70)?.etiqueta, 'Obesidad')
   assert.equal(estadoNutricional(22, 12), null)
+})
+
+test('gestantes: curva de Atalah por semana, con un decimal', () => {
+  assert.equal(estadoNutricional(18.4, 30, 6)?.etiqueta, 'Bajo peso')
+  assert.equal(estadoNutricional(18.5, 30, 6)?.etiqueta, 'Normal')
+  assert.equal(estadoNutricional(30.0, 30, 7)?.etiqueta, 'Sobrepeso')
+  assert.equal(estadoNutricional(30.1, 30, 7)?.etiqueta, 'Obesidad')
+  assert.equal(estadoNutricional(26.7, 30, 24)?.etiqueta, 'Normal')
+  assert.equal(estadoNutricional(26.8, 30, 24)?.etiqueta, 'Sobrepeso')
+  assert.equal(estadoNutricional(23.24, 30, 42)?.etiqueta, 'Bajo peso') // ≤ 23,2
+  assert.equal(estadoNutricional(33, 30, 42)?.etiqueta, 'Obesidad')
+  assert.equal(estadoNutricional(20.1, 30, 22)?.etiqueta, 'Bajo peso') // sin gestación sería normal
+  assert.equal(estadoNutricional(24, 30, 5), null)
+  assert.equal(estadoNutricional(24, 30, 43), null)
 })
 
 test('riesgo cardiovascular por cintura y sexo', () => {

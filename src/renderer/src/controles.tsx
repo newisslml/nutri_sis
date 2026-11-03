@@ -37,12 +37,13 @@ import {
   durninWomersley,
   kerr,
   sumaPliegues,
+  tallaChumlea,
   type DatosAntropometria,
   type Grupo,
   type Sitio
 } from '../../calculo/antropometria'
 import { FORMULAS, faltantes } from '../../calculo/formulas'
-import { ADICIONAL, DIAS, calcularGastoSemanal, type EstadoFisiologico } from '../../calculo/gasto'
+import { ADICIONAL, DIAS, calcularGastoSemanal, poblacionMet, type EstadoFisiologico } from '../../calculo/gasto'
 import { requerimientoDia } from '../../calculo/intercambio'
 import {
   entradaGasto,
@@ -188,18 +189,23 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
   const [destinos, setDestinos] = useState<string[]>([])
 
   const porId = useMemo(() => new Map(actividades.map((a) => [a.id, a])), [actividades])
-  const opciones = useMemo(() => {
-    const grupos = new Map<string, ComboboxItem[]>()
-    for (const a of actividades) {
-      if (!grupos.has(a.categoria)) grupos.set(a.categoria, [])
-      grupos.get(a.categoria)!.push({ value: String(a.id), label: `${a.nombre} · ${a.met.toLocaleString('es-CL')} MET` })
-    }
-    return [...grupos].map(([group, items]) => ({ group, items }))
-  }, [actividades])
 
   const fechaValida = /^\d{4}-\d{2}-\d{2}$/.test(b.fecha)
   const meses = fechaValida ? edadEnMeses(paciente.fechaNacimiento, b.fecha) : null
   const edad = meses === null ? null : Math.floor(meses / 12)
+  // Primero la tabla de la edad (juvenil o adulto mayor) y después la de adultos, para lo que esa tabla no tenga.
+  // ponytail: un bloque copiado de un control con otro grupo de edad queda sin nombre en el selector y se vuelve a elegir.
+  const poblacion = poblacionMet(edad ?? 18)
+  const opciones = useMemo(() => {
+    const grupos = new Map<string, ComboboxItem[]>()
+    const propias = poblacion === 'adulto' ? [] : actividades.filter((a) => a.poblacion === poblacion)
+    for (const a of [...propias, ...actividades.filter((a) => a.poblacion === 'adulto')]) {
+      const grupo = a.poblacion === 'adulto' ? a.categoria : `${poblacion === '60+' ? 'Adulto mayor' : `Juvenil ${poblacion} años`} · ${a.categoria}`
+      if (!grupos.has(grupo)) grupos.set(grupo, [])
+      grupos.get(grupo)!.push({ value: String(a.id), label: `${a.nombre} · ${a.met.toLocaleString('es-CL')} MET` })
+    }
+    return [...grupos].map(([group, items]) => ({ group, items }))
+  }, [actividades, poblacion])
   const calculo = useMemo(() => {
     if (!b.pesoKg) return { error: 'Ingrese el peso en la pestaña Antropometría para calcular el gasto' }
     if (!fechaValida) return { error: 'Ingrese la fecha del control en la pestaña Antropometría' }
@@ -270,7 +276,17 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
           : []
       )
   }, [historial.data, b.id, b.fecha, b.pesoKg, b.tallaCm, b.antropometria, fechaValida, paciente])
-  const informe = { datos: datosAntropometria, paciente, fecha: b.fecha, edadMeses: meses, enfermedades: b.enfermedades, evolucion }
+  const informe = {
+    datos: datosAntropometria,
+    paciente,
+    fecha: b.fecha,
+    edadMeses: meses,
+    semanaEmbarazo: b.semanaEmbarazo,
+    enfermedades: b.enfermedades,
+    evolucion
+  }
+  const alturaRodilla = b.antropometria.basicos.alturaRodilla
+  const tallaRodilla = alturaRodilla && edad !== null && edad >= 60 ? Math.round(tallaChumlea(alturaRodilla, edad, paciente.sexo) * 10) / 10 : null
   // Informes, alimentación y pauta usan el ancho completo, sin el panel lateral del gasto.
   const anchoCompleto = ['penta', 'bi', 'alimentacion', 'pauta', 'entrega'].includes(pestana ?? '')
   // Sin cambios pendientes se muestra el resultado congelado al guardar; editando, el cálculo en vivo.
@@ -373,6 +389,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                   paciente={paciente}
                   fecha={b.fecha}
                   edadMeses={meses}
+                  semanaEmbarazo={b.semanaEmbarazo}
                   datos={datosAntropometria}
                   evolucion={evolucion}
                   pauta={b.pauta}
@@ -442,6 +459,19 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                           />
                         ))}
                       </SimpleGrid>
+                      {g === 'basicos' && tallaRodilla !== null && (
+                        <Text size="sm" mt="md">
+                          Talla estimada por altura de rodilla (Chumlea): <b>{decimal(tallaRodilla)} cm</b>
+                          {b.tallaCm !== tallaRodilla && (
+                            <>
+                              {' · '}
+                              <Anchor component="button" size="sm" onClick={() => cambiar({ tallaCm: tallaRodilla })}>
+                                Usar como talla
+                              </Anchor>
+                            </>
+                          )}
+                        </Text>
+                      )}
                       {g === 'pliegues' && (
                         <Group mt="md" gap="xl">
                           {SUMAS_PLIEGUES.map(([nombre, sitios]) => {
@@ -586,15 +616,29 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                       />
                     </Group>
                     {paciente.sexo === 'F' && (
-                      <Select
-                        mt="md"
-                        label="Gestación o lactancia"
-                        placeholder="No aplica"
-                        clearable
-                        data={OPCIONES_ESTADO}
-                        value={b.estado}
-                        onChange={(v) => cambiar({ estado: v as EstadoFisiologico | null })}
-                      />
+                      <Group mt="md" grow align="flex-start">
+                        <Select
+                          label="Gestación o lactancia"
+                          placeholder="No aplica"
+                          clearable
+                          data={OPCIONES_ESTADO}
+                          value={b.estado}
+                          onChange={(v) =>
+                            cambiar({ estado: v as EstadoFisiologico | null, semanaEmbarazo: v?.startsWith('gestacion') ? b.semanaEmbarazo : null })
+                          }
+                        />
+                        {b.estado?.startsWith('gestacion') && (
+                          <NumberInput
+                            label="Semana de gestación"
+                            description="Para el IMC gestacional (curva de Atalah, semanas 6 a 42)"
+                            min={1}
+                            max={42}
+                            allowDecimal={false}
+                            value={b.semanaEmbarazo ?? ''}
+                            onChange={(v) => cambiar({ semanaEmbarazo: numero(v) })}
+                          />
+                        )}
+                      </Group>
                     )}
                     <Group mt="md">
                       <SegmentedControl

@@ -11,6 +11,7 @@ import {
   PLIEGUES_8,
   somatotipo,
   sumaPliegues,
+  tallaChumlea,
   type DatosAntropometria,
   type Medidas
 } from '../src/calculo/antropometria.ts'
@@ -207,4 +208,9 @@ test('bicompartimental: avisa si el músculo supera la masa libre de grasa', () 
   const r = resultado(bicompartimental({ ...hoja, medidas: grande }, 'lee'))
   assert.ok(r.residual.kg < 0)
   assert.match(r.avisos.join(), /supera la masa libre de grasa/)
+})
+
+test('talla por altura de rodilla (Chumlea 1985)', () => {
+  cerca(tallaChumlea(48, 70, 'F'), 155.92) // 84,88 − 0,24 × 70 + 1,83 × 48
+  cerca(tallaChumlea(52, 70, 'M'), 166.43) // 64,19 − 0,04 × 70 + 2,02 × 52
 })

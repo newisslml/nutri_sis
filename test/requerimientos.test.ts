@@ -1,7 +1,8 @@
 // Casos de la hoja 24H-REQ de la ficha maestra (valores que muestra el Excel). Fabi debe revisarlos y agregar los suyos.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cambioEstimadoKgMes, hidratacion, metaKcal, requerimientoDia, totalPorciones } from '../src/calculo/intercambio.ts'
+import { CODIGOS, cambioEstimadoKgMes, hidratacion, metaKcal, requerimientoDia, totalPorciones } from '../src/calculo/intercambio.ts'
+import { PREPARACIONES } from '../src/renderer/src/textos-pauta.ts'
 
 const cerca = (real: number, esperado: number, tolerancia = 0.01) =>
   assert.ok(Math.abs(real - esperado) <= tolerancia, `${real} no es ${esperado} ± ${tolerancia}`)
@@ -39,4 +40,10 @@ test('hidratación y cambio de peso estimado', () => {
   cerca(hidratacion(76.5).diaL, 2.6775, 0.0001) // PLAN Y40
   cerca(hidratacion(76.5).antesEjercicioL, 0.3825, 0.0001) // PLAN Y41
   cerca(cambioEstimadoKgMes(2500, 2000), 2.143) // 500 kcal/día × 30 / 7000
+})
+
+test('las porciones de las preparaciones usan cantidades y códigos de intercambio', () => {
+  const porciones = PREPARACIONES.flatMap((p) => p.nombre.split(' — ')[1]?.split(' · ') ?? [])
+  assert.ok(porciones.length > 100)
+  for (const x of porciones) assert.match(x, new RegExp(`^(\\d+½?|½) (${CODIGOS.join('|')})$`))
 })

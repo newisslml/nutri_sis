@@ -1,7 +1,16 @@
-/* PDF de la pauta (pauta.tsx, printToPDF): solo el contenido de la pestaña Entrega, en A4. */
+/* PDF de la entrega (pauta.tsx, printToPDF): Consulta nutricional y Control antropométrico, cada uno con su portada, en A4. */
+/* Márgenes laterales como padding del contenido: Chromium diagrama todas las páginas con el mismo ancho,
+   y una portada más ancha que la página con márgenes achica el documento entero. */
 @page {
   size: A4;
-  margin: 12mm;
+  margin: 12mm 0;
+}
+@page :first {
+  margin: 0;
+}
+
+.portada {
+  display: none;
 }
 
 @media print {
@@ -10,12 +19,42 @@
     font-size: 12px;
   }
   .mantine-AppShell-header,
-  [data-no-imprimir] {
+  [data-no-imprimir],
+  html[data-pdf='nutricional'] [data-informe='antropometrico'],
+  html[data-pdf='antropometrico'] [data-informe='nutricional'] {
     display: none !important;
   }
   .mantine-AppShell-main {
-    padding: 0 !important;
+    padding: 0 12mm !important;
     min-height: 0 !important;
+  }
+  .mantine-Tabs-panel {
+    padding-top: 0 !important;
+  }
+  .portada {
+    display: block;
+    position: relative;
+    height: 297mm;
+    margin: 0 -12mm;
+    break-after: page;
+  }
+  .portada img {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  /* Sobre la línea de la franja verde, alineado con el texto "... PARA" de la imagen. */
+  .portada-nombre {
+    position: absolute;
+    left: 8.6%;
+    right: 8.6%;
+    bottom: 4.3%;
+    margin: 0;
+    color: #f5ebdc;
+    font: 22pt Georgia, serif;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .pauta-salto {
     break-before: page;

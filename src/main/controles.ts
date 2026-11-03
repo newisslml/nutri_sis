@@ -14,7 +14,7 @@ import { auditar, type DB } from './db'
 
 export function actividades(db: DB): ActividadMet[] {
   return db
-    .prepare('SELECT id, codigo, categoria, nombre, met, estimado FROM actividad_met ORDER BY codigo, nombre')
+    .prepare('SELECT id, codigo, categoria, nombre, met, estimado, poblacion FROM actividad_met ORDER BY codigo, nombre')
     .all()
     .map((a) => ({ ...(a as ActividadMet), estimado: (a as { estimado: number }).estimado === 1 }))
 }
@@ -42,14 +42,28 @@ export function evolucion(db: DB, pacienteId: number): EvolucionControl[] {
 
 /**
  * Control nuevo con fecha de hoy. Si hay uno anterior guardado, copia su rutina, sus parámetros, el historial médico y la pauta
- * para editar solo lo que cambió; la talla se copia solo en adultos (en niños se vuelve a medir). El peso siempre se mide de nuevo
- * y el recordatorio de 24 horas parte vacío.
+ * para editar solo lo que cambió; la talla se copia solo en adultos (en niños se vuelve a medir). Terminado el crecimiento (21 años en
+ * hombres, 19 en mujeres) los diámetros óseos no cambian: se copian de la última medición hecha desde esa edad. El peso siempre se
+ * mide de nuevo y el recordatorio de 24 horas parte vacío.
  */
 export function crear(db: DB, pacienteId: number, profesionalId: number): number {
-  const p = db.prepare('SELECT fecha_nacimiento AS f FROM paciente WHERE id = ?').get(pacienteId) as { f: string } | undefined
+  const p = db.prepare('SELECT fecha_nacimiento AS f, sexo FROM paciente WHERE id = ?').get(pacienteId) as { f: string; sexo: string } | undefined
   if (!p) throw new Error('Paciente no encontrado')
   const fecha = hoyISO()
   const meses = edadEnMeses(p.f, fecha)
+  const adultoDesde = (p.sexo === 'M' ? 21 : 19) * 12
+  const diametros =
+    meses >= adultoDesde
+      ? (
+          db
+            .prepare(
+              `SELECT json_extract(antropometria, '$.diametros') AS d FROM control
+               WHERE paciente_id = ? AND gasto IS NOT NULL AND edad_meses >= ? AND json_extract(antropometria, '$.diametros') NOT IN ('{}')
+               ORDER BY fecha DESC, id DESC LIMIT 1`
+            )
+            .get(pacienteId, adultoDesde) as { d: string } | undefined
+        )?.d
+      : undefined
   const anterior = db
     .prepare(
       `SELECT id, talla_cm AS tallaCm, formula_id AS formulaId, modo_met AS modo, met_reposo AS metReposo, eta, estado_fisiologico AS estado,
@@ -98,8 +112,8 @@ export function crear(db: DB, pacienteId: number, profesionalId: number): number
       db
         .prepare(
           `INSERT INTO control (paciente_id, profesional_id, fecha, edad_meses, talla_cm, formula_id, modo_met, met_reposo, eta, estado_fisiologico,
-             objetivo_calorico, ajuste_pct, alergias, intolerancias, enfermedades, medicamentos, examenes, pauta)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             objetivo_calorico, ajuste_pct, alergias, intolerancias, enfermedades, medicamentos, examenes, pauta, antropometria)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           pacienteId,
@@ -119,7 +133,8 @@ export function crear(db: DB, pacienteId: number, profesionalId: number): number
           base.enfermedades,
           base.medicamentos,
           base.examenes,
-          base.pauta
+          base.pauta,
+          diametros ? `{"diametros":${diametros}}` : '{}'
         )
         .lastInsertRowid
     )
@@ -145,8 +160,8 @@ export function obtener(db: DB, id: number): Control {
     .prepare(
       `SELECT id, paciente_id AS pacienteId, fecha, edad_meses AS edadMeses, peso_kg AS pesoKg, talla_cm AS tallaCm,
          masa_libre_grasa_kg AS masaLibreGrasaKg, formula_id AS formulaId, tmb_manual AS tmbManual, modo_met AS modo, met_reposo AS metReposo, eta,
-         estado_fisiologico AS estado, objetivo_calorico AS objetivoCalorico, ajuste_pct AS ajustePct, motivo, notas, alergias, intolerancias, enfermedades, medicamentos, examenes,
-         antropometria, recordatorio, pauta, gasto
+         estado_fisiologico AS estado, semana_embarazo AS semanaEmbarazo, objetivo_calorico AS objetivoCalorico, ajuste_pct AS ajustePct, motivo, notas,
+         alergias, intolerancias, enfermedades, medicamentos, examenes, antropometria, recordatorio, pauta, gasto
        FROM control WHERE id = ?`
     )
     .get(id) as
@@ -188,6 +203,7 @@ export function guardar(db: DB, c: ControlGuardar, profesionalId: number): Contr
     sexo: 'F' | 'M'
   }
   if (c.estado && paciente.sexo !== 'F') throw new Error('Gestación y lactancia solo aplican a pacientes de sexo femenino')
+  if (c.semanaEmbarazo !== null && !c.estado?.startsWith('gestacion')) throw new Error('La semana de gestación solo aplica en gestación')
   if (c.masaLibreGrasaKg !== null && c.masaLibreGrasaKg >= c.pesoKg) throw new Error('La masa libre de grasa debe ser menor que el peso')
   const gasto = calcularGastoSemanal(entradaGasto(c, paciente))
   const edadMeses = edadEnMeses(paciente.fechaNacimiento, c.fecha)
@@ -203,6 +219,7 @@ export function guardar(db: DB, c: ControlGuardar, profesionalId: number): Contr
     metReposo: x.metReposo,
     eta: x.eta,
     estado: x.estado,
+    semanaEmbarazo: x.semanaEmbarazo,
     objetivoCalorico: x.objetivoCalorico,
     ajustePct: x.ajustePct,
     motivo: x.motivo,
@@ -225,8 +242,8 @@ export function guardar(db: DB, c: ControlGuardar, profesionalId: number): Contr
   db.transaction(() => {
     db.prepare(
       `UPDATE control SET fecha = ?, edad_meses = ?, peso_kg = ?, talla_cm = ?, masa_libre_grasa_kg = ?, formula_id = ?, tmb_manual = ?,
-         modo_met = ?, met_reposo = ?, eta = ?, estado_fisiologico = ?, objetivo_calorico = ?, ajuste_pct = ?, motivo = ?, notas = ?, alergias = ?, intolerancias = ?,
-         enfermedades = ?, medicamentos = ?, examenes = ?, antropometria = ?, recordatorio = ?, pauta = ?, gasto = ? WHERE id = ?`
+         modo_met = ?, met_reposo = ?, eta = ?, estado_fisiologico = ?, semana_embarazo = ?, objetivo_calorico = ?, ajuste_pct = ?, motivo = ?, notas = ?,
+         alergias = ?, intolerancias = ?, enfermedades = ?, medicamentos = ?, examenes = ?, antropometria = ?, recordatorio = ?, pauta = ?, gasto = ? WHERE id = ?`
     ).run(
       c.fecha,
       edadMeses,
@@ -239,6 +256,7 @@ export function guardar(db: DB, c: ControlGuardar, profesionalId: number): Contr
       c.metReposo,
       c.eta ? 1 : 0,
       c.estado,
+      c.semanaEmbarazo,
       c.objetivoCalorico,
       c.ajustePct,
       c.motivo,

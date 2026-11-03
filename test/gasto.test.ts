@@ -1,7 +1,7 @@
 // Casos calculados a mano. El profesional debe revisarlos y agregar los suyos: sin ellos una fórmula no entra.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { calcularGastoSemanal, calcularTMB, type Bloque, type EntradaGasto } from '../src/calculo/gasto.ts'
+import { calcularGastoSemanal, calcularTMB, poblacionMet, type Bloque, type EntradaGasto } from '../src/calculo/gasto.ts'
 
 const tmb = (id: string, d: Parameters<typeof calcularTMB>[1]) => Math.round(calcularTMB(id, d).tmb)
 
@@ -100,4 +100,8 @@ test('niño: fuerza modo TMB con METy', () => {
 test('día de más de 24 horas', () => {
   const largo: Bloque[] = [{ met: 1, minutos: 1500 }]
   assert.throws(() => calcularGastoSemanal({ ...base, semana: [...base.semana.slice(0, 6), largo] }), /Domingo suma más de 24 horas/)
+})
+
+test('tabla MET según la edad: grupo juvenil, adulto o adulto mayor', () => {
+  assert.deepEqual([4, 9, 10, 12, 13, 15, 16, 17, 18, 59, 60].map(poblacionMet), ['6-9', '6-9', '10-12', '10-12', '13-15', '13-15', '16-18', '16-18', 'adulto', 'adulto', '60+'])
 })

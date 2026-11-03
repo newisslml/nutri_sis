@@ -41,7 +41,18 @@ test('compendio MET: 822 actividades de MET.md', () => {
   assert.equal(actividades.length, 822)
   assert.equal(new Set(actividades.map((a) => a.categoria)).size, 21)
   const porCodigo = (c: string) => actividades.find((a) => a.codigo === c)!
-  assert.deepEqual(porCodigo('07030'), { codigo: '07030', categoria: 'Inactividad', nombre: 'Dormir', met: 0.95, estimado: false })
+  assert.deepEqual(porCodigo('07030'), { codigo: '07030', categoria: 'Inactividad', nombre: 'Dormir', valores: [0.95], estimado: false })
   assert.equal(porCodigo('01008').estimado, true)
   assert.equal(porCodigo('01010').nombre.startsWith('Ciclismo, <16 km/h'), true)
+})
+
+test('compendios juvenil (METy por grupo de edad) y de adultos mayores (MET60+)', () => {
+  const leer = (archivo: string) => parsearCompendio(readFileSync(new URL(`../${archivo}`, import.meta.url), 'utf8'))
+  const juvenil = leer('METy.md')
+  assert.equal(juvenil.length, 196)
+  assert.equal(new Set(juvenil.map((a) => a.categoria)).size, 16)
+  assert.deepEqual(juvenil.find((a) => a.codigo === '80260')!.valores, [null, null, 6.6, 7.2]) // caminata a 7,2 km/h: sin valor bajo 13 años
+  const mayor = leer('MET60.md')
+  assert.equal(mayor.length, 99)
+  assert.deepEqual(mayor.find((a) => a.codigo === '0510060')!.valores, [4])
 })

@@ -1,8 +1,8 @@
 // Gráficos del informe antropométrico. Usan variables CSS de Mantine para seguir el modo claro y oscuro.
-import { RingProgress, Stack, Text } from '@mantine/core'
+import { ColorSwatch, Group, Paper, RingProgress, SimpleGrid, Stack, Text } from '@mantine/core'
 import type { PerfilPhantom } from '../../calculo/antropometria'
 import type { Nivel } from '../../calculo/clasificacion'
-import { decimal, fechaCL, puntajeZ } from './formato'
+import { decimal, fechaCL, kilos, puntajeZ } from './formato'
 
 /** "red.6" → var(--mantine-color-red-6) */
 export const colorCss = (c: string) => `var(--mantine-color-${c.replace('.', '-')})`
@@ -74,10 +74,10 @@ const posZ = (z: number) => `${((Math.min(Z_MAX, Math.max(-Z_MAX, z)) + Z_MAX) /
 const MARCAS_Z = [-3, -2, -1, 0, 1, 2, 3]
 const FILA_Z = { display: 'grid', gridTemplateColumns: '170px 1fr 56px', alignItems: 'center', gap: 8 }
 
-/** Un punto por medida sobre una escala de −4 a +4 desviaciones estándar; la franja central es ±1. */
+/** Un punto por medida sobre una escala de −4 a +4 desviaciones estándar; la franja central es ±1. Centrado y angosto, para leerlo de un vistazo. */
 export function GraficoPhantom({ grupos }: { grupos: PerfilPhantom }) {
   return (
-    <Stack gap="md">
+    <Stack gap="md" w="100%" maw={640} mx="auto">
       <div style={FILA_Z}>
         <span />
         <div style={{ position: 'relative', height: 16 }}>
@@ -147,6 +147,21 @@ const SOMA_Y = [-12, 16]
 const somaPx = (v: number) => SOMA_M + ((Math.min(SOMA_X[1], Math.max(SOMA_X[0], v)) - SOMA_X[0]) / (SOMA_X[1] - SOMA_X[0])) * (SOMA_W - 2 * SOMA_M)
 const somaPy = (v: number) => SOMA_M + ((SOMA_Y[1] - Math.min(SOMA_Y[1], Math.max(SOMA_Y[0], v))) / (SOMA_Y[1] - SOMA_Y[0])) * (SOMA_H - 2 * SOMA_M)
 const rango = (desde: number, hasta: number, paso: number) => Array.from({ length: Math.floor((hasta - desde) / paso) + 1 }, (_, i) => desde + i * paso)
+// Vértices del triángulo: los somatotipos puros 7-1-1 (endomorfo), 1-7-1 (mesomorfo) y 1-1-7 (ectomorfo).
+const VERTICES_SOMA = [
+  [-6, -6],
+  [0, 12],
+  [6, -6]
+].map(([vx, vy]) => [somaPx(vx), somaPy(vy)])
+// Cada lado es un arco de radio igual a la cuerda, hacia afuera (forma de triángulo de Reuleaux, como la somatocarta clásica).
+const TRIANGULO_SOMA =
+  `M${VERTICES_SOMA[2].join(' ')}` +
+  VERTICES_SOMA.map(([vx, vy], i) => {
+    const [ax, ay] = VERTICES_SOMA[(i + 2) % 3]
+    const r = Math.hypot(vx - ax, vy - ay)
+    return `A${r} ${r} 0 0 1 ${vx} ${vy}`
+  }).join('') +
+  'Z'
 
 /** Somatocarta: x = ectomorfia − endomorfia, y = 2 × mesomorfia − (endomorfia + ectomorfia). */
 export function Somatocarta({ x, y }: { x: number; y: number }) {
@@ -169,16 +184,22 @@ export function Somatocarta({ x, y }: { x: number; y: number }) {
           {v}
         </text>
       ))}
-      <text x={somaPx(-5.5)} y={somaPy(-9)} textAnchor="middle" {...texto} fontSize={11} fontWeight={600}>
+      <path d={TRIANGULO_SOMA} fill="var(--mantine-color-gray-light)" stroke="var(--mantine-color-gray-5)" strokeWidth={2.5} />
+      {VERTICES_SOMA.map(([vx, vy]) => (
+        <line key={vx} x1={somaPx(0)} y1={somaPy(0)} x2={vx} y2={vy} stroke="var(--mantine-color-gray-5)" strokeDasharray="4 3" />
+      ))}
+      <text x={somaPx(-5.5)} y={somaPy(-9)} textAnchor="middle" {...texto} fill="var(--mantine-color-gray-5)" fontSize={13} fontWeight={700}>
         Endomorfia
       </text>
-      <text x={somaPx(5.5)} y={somaPy(-9)} textAnchor="middle" {...texto} fontSize={11} fontWeight={600}>
+      <text x={somaPx(5.5)} y={somaPy(-9)} textAnchor="middle" {...texto} fill="var(--mantine-color-gray-5)" fontSize={13} fontWeight={700}>
         Ectomorfia
       </text>
-      <text x={somaPx(0)} y={somaPy(14.5)} textAnchor="middle" {...texto} fontSize={11} fontWeight={600}>
+      <text x={somaPx(0)} y={somaPy(14.5)} textAnchor="middle" {...texto} fill="var(--mantine-color-gray-5)" fontSize={13} fontWeight={700}>
         Mesomorfia
       </text>
-      <circle cx={somaPx(x)} cy={somaPy(y)} r={7} fill="var(--mantine-primary-color-filled)" stroke="var(--mantine-color-body)" strokeWidth={2}>
+      {/* El somatotipo del paciente en verde, con halo y anillo, para que resalte sobre el triángulo gris en ambos modos. */}
+      <circle cx={somaPx(x)} cy={somaPy(y)} r={12} fill="none" stroke={colorCss('green.7')} strokeWidth={2} />
+      <circle cx={somaPx(x)} cy={somaPy(y)} r={7} fill={colorCss('green.7')} stroke="var(--mantine-color-body)" strokeWidth={2.5}>
         <title>{`x ${decimal(x)} · y ${decimal(y)}`}</title>
       </circle>
     </svg>
@@ -186,24 +207,42 @@ export function Somatocarta({ x, y }: { x: number; y: number }) {
 }
 
 export type SerieEvolucion = { nombre: string; color: string; valores: (number | null)[] }
-const [EV_W, EV_H, EV_IZQ, EV_DER, EV_ARR, EV_ABA] = [640, 260, 40, 16, 12, 34]
+/** Un gráfico de la evolución: una o más líneas en la misma unidad, con su paso de eje. */
+export type PanelEvolucion = { titulo: string; unidad: string; paso: number; series: SerieEvolucion[] }
+const [EV_W, EV_H, EV_IZQ, EV_DER, EV_ARR, EV_ABA] = [320, 220, 34, 32, 22, 34]
 
-/** Líneas de kg por control, con las fechas repartidas a igual distancia; un valor null deja un corte en la línea. */
-export function GraficoEvolucion({ fechas, series }: { fechas: string[]; series: SerieEvolucion[] }) {
-  const tope = Math.ceil(Math.max(1, ...series.flatMap((s) => s.valores.filter((v) => v !== null))) / 20) * 20
+/** Panel de una sola línea; por omisión en kg y con el eje de 10 en 10. */
+export const panel = (titulo: string, color: string, valores: (number | null)[], unidad = 'kg', paso = 10): PanelEvolucion => ({
+  titulo,
+  unidad,
+  paso,
+  series: [{ nombre: titulo, color, valores }]
+})
+
+/**
+ * Líneas por control, con las fechas repartidas a igual distancia; un valor null deja un corte en la línea.
+ * El eje no parte en 0: va de paso en paso entre los múltiplos que rodean los valores, para que se note la diferencia.
+ * Con una sola línea cada punto lleva su valor; con varias, la leyenda del panel las identifica.
+ */
+export function GraficoEvolucion({ fechas, series, unidad = 'kg', paso = 10 }: { fechas: string[]; series: SerieEvolucion[]; unidad?: string; paso?: number }) {
+  const valores = series.flatMap((s) => s.valores.filter((v) => v !== null))
+  const piso = valores.length ? Math.floor(Math.min(...valores) / paso) * paso : 0
+  const tope = Math.max(piso + paso, valores.length ? Math.ceil(Math.max(...valores) / paso) * paso : paso)
+  const marcas = Array.from({ length: Math.round((tope - piso) / paso) + 1 }, (_, i) => piso + i * paso)
+  const valor = paso < 1 ? kilos : decimal
   const px = (i: number) => EV_IZQ + (fechas.length === 1 ? 0.5 : i / (fechas.length - 1)) * (EV_W - EV_IZQ - EV_DER)
-  const py = (v: number) => EV_ARR + (1 - v / tope) * (EV_H - EV_ARR - EV_ABA)
+  const py = (v: number) => EV_ARR + (1 - (v - piso) / (tope - piso)) * (EV_H - EV_ARR - EV_ABA)
   const trazo = (vs: (number | null)[]) =>
     vs.reduce((d, v, i) => (v === null ? d : `${d}${i > 0 && vs[i - 1] !== null ? 'L' : 'M'}${px(i)} ${py(v)}`), '')
-  const cadaCuantas = Math.ceil(fechas.length / 8)
+  const cadaCuantas = Math.ceil(fechas.length / 4)
   const texto = { fill: 'var(--mantine-color-dimmed)', fontSize: 11 }
   return (
-    <svg viewBox={`0 0 ${EV_W} ${EV_H}`} role="img" aria-label="Evolución por control" style={{ width: '100%', maxWidth: 760 }}>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <g key={i}>
-          <line x1={EV_IZQ} x2={EV_W - EV_DER} y1={py((tope * i) / 4)} y2={py((tope * i) / 4)} stroke="var(--mantine-color-default-border)" />
-          <text x={EV_IZQ - 6} y={py((tope * i) / 4) + 4} textAnchor="end" {...texto}>
-            {(tope * i) / 4}
+    <svg viewBox={`0 0 ${EV_W} ${EV_H}`} role="img" aria-label="Evolución por control" style={{ width: '100%' }}>
+      {marcas.map((m) => (
+        <g key={m}>
+          <line x1={EV_IZQ} x2={EV_W - EV_DER} y1={py(m)} y2={py(m)} stroke="var(--mantine-color-default-border)" />
+          <text x={EV_IZQ - 6} y={py(m) + 4} textAnchor="end" {...texto}>
+            {m}
           </text>
         </g>
       ))}
@@ -219,13 +258,56 @@ export function GraficoEvolucion({ fechas, series }: { fechas: string[]; series:
           <path d={trazo(s.valores)} fill="none" strokeWidth={2.5} strokeLinejoin="round" />
           {s.valores.map((v, i) =>
             v === null ? null : (
-              <circle key={i} cx={px(i)} cy={py(v)} r={4} stroke="var(--mantine-color-body)" strokeWidth={1.5}>
-                <title>{`${s.nombre} · ${fechaCL(fechas[i])}: ${decimal(v)} kg`}</title>
-              </circle>
+              <g key={i}>
+                <circle cx={px(i)} cy={py(v)} r={4} stroke="var(--mantine-color-body)" strokeWidth={1.5}>
+                  <title>{`${s.nombre} · ${fechaCL(fechas[i])}: ${valor(v)} ${unidad}`.trim()}</title>
+                </circle>
+                {series.length === 1 && (
+                  <text x={px(i)} y={py(v) - 9} textAnchor="middle" stroke="none" fill="var(--mantine-color-text)" fontSize={11} fontWeight={600}>
+                    {valor(v)}
+                  </text>
+                )}
+              </g>
             )
           )}
         </g>
       ))}
     </svg>
+  )
+}
+
+/** Un gráfico por panel (peso, masas, pliegues, perímetros, índices), de a tres por fila, cada uno con su propia escala. */
+export function EvolucionPorSerie({ fechas, paneles }: { fechas: string[]; paneles: PanelEvolucion[] }) {
+  return (
+    <SimpleGrid cols={Math.min(paneles.length, 3)}>
+      {paneles.map((p) => (
+        <Paper withBorder p="sm" key={p.titulo} className="pauta-bloque">
+          <Group gap={6} mb={4} wrap="nowrap">
+            {p.series.length === 1 && <ColorSwatch size={12} color={colorCss(p.series[0].color)} />}
+            <Text size="sm" fw={600}>
+              {p.titulo}
+              {p.unidad && ` (${p.unidad})`}
+            </Text>
+          </Group>
+          {p.series.length > 1 && (
+            <Group gap="xs" mb={4}>
+              {p.series.map((s) => (
+                <Group gap={4} key={s.nombre} wrap="nowrap">
+                  <ColorSwatch size={10} color={colorCss(s.color)} />
+                  <Text size="xs">{s.nombre}</Text>
+                </Group>
+              ))}
+            </Group>
+          )}
+          {p.series.some((s) => s.valores.some((v) => v !== null)) ? (
+            <GraficoEvolucion fechas={fechas} series={p.series} unidad={p.unidad} paso={p.paso} />
+          ) : (
+            <Text size="sm" c="dimmed">
+              Sin medidas en estos controles.
+            </Text>
+          )}
+        </Paper>
+      ))}
+    </SimpleGrid>
   )
 }
