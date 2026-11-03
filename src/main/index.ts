@@ -1,108 +1,20 @@
 // Backend: proceso principal de Electron. Único que toca el disco y la base de datos.
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { ZodError, type z } from 'zod'
-import { entradas, type Canal, type Respuesta, type Salidas } from '../shared/contratos'
-import { claveATexto, desenvolver, envolver, nuevaClave, textoAClave, type Envoltura } from './claves'
-import * as controles from './controles'
-import { abrirBase, type DB } from './db'
-import * as pacientes from './pacientes'
+import { entradas } from '../shared/contratos'
+import { crearCanales } from './canales'
 
 // NUTRI_DATOS permite apuntar a una carpeta de prueba sin tocar los datos reales.
 app.setPath('userData', process.env.NUTRI_DATOS ?? join(app.getPath('appData'), 'SistemaNutri'))
-const RUTA_DB = join(app.getPath('userData'), 'nutri.db')
-// Respaldo futuro: copiar claves.json junto a nutri.db; sin él solo abre la clave de recuperación.
-const RUTA_CLAVES = join(app.getPath('userData'), 'claves.json')
-
-let db: DB | null = null
-let profesionalId = 0
-
-function base(): DB {
-  if (!db) throw new Error('La base de datos está bloqueada')
-  return db
-}
-
-function abrir(clave: Buffer): void {
-  try {
-    db = abrirBase(RUTA_DB, clave)
-  } catch (e) {
-    if ((e as { code?: string }).code === 'SQLITE_NOTADB') throw new Error('Clave incorrecta')
-    throw e
-  }
-  profesionalId = (db.prepare('SELECT min(id) AS id FROM profesional').get() as { id: number }).id
-}
-
-function mensajeError(e: unknown): string {
-  if (e instanceof ZodError) return e.issues.map((i) => i.message).join('. ')
-  const mensaje = e instanceof Error ? e.message : String(e)
-  if (mensaje.includes('UNIQUE constraint failed: paciente.rut')) return 'Ya existe un paciente con ese RUT'
-  return mensaje
-}
-
-function manejar<C extends Canal>(canal: C, fn: (entrada: z.output<(typeof entradas)[C]>) => Salidas[C] | Promise<Salidas[C]>): void {
-  ipcMain.handle(canal, async (_evento, crudo): Promise<Respuesta<Salidas[C]>> => {
-    try {
-      return { ok: true, datos: await fn(entradas[canal].parse(crudo) as z.output<(typeof entradas)[C]>) }
-    } catch (e) {
-      console.error(canal, e)
-      return { ok: false, error: mensajeError(e) }
-    }
-  })
-}
-
-manejar('sesion.estado', () => ({
-  configurada: existsSync(RUTA_DB),
-  abierta: db !== null,
-  profesional: db ? (db.prepare('SELECT nombre FROM profesional WHERE id = ?').get(profesionalId) as { nombre: string }).nombre : null
-}))
-
-manejar('sesion.configurar', ({ nombreProfesional, contrasena }) => {
-  if (existsSync(RUTA_DB)) throw new Error('Ya existe una base de datos en este equipo')
-  const clave = nuevaClave()
-  writeFileSync(RUTA_CLAVES, JSON.stringify({ version: 1, contrasena: envolver(clave, contrasena) }))
-  db = abrirBase(RUTA_DB, clave)
-  profesionalId = Number(db.prepare('INSERT INTO profesional (nombre) VALUES (?)').run(nombreProfesional).lastInsertRowid)
-  return { claveRecuperacion: claveATexto(clave) }
-})
-
-manejar('sesion.desbloquear', ({ secreto }) => {
-  let clave = textoAClave(secreto)
-  if (!clave) {
-    if (!existsSync(RUTA_CLAVES)) throw new Error('Falta claves.json: use la clave de recuperación')
-    const archivo = JSON.parse(readFileSync(RUTA_CLAVES, 'utf8')) as { contrasena: Envoltura }
-    clave = desenvolver(archivo.contrasena, secreto)
-    if (!clave) throw new Error('Contraseña incorrecta')
-  }
-  abrir(clave)
-  return null
-})
-
-manejar('sesion.bloquear', () => {
-  db?.close()
-  db = null
-  return null
-})
-
-manejar('pacientes.listar', ({ busqueda, perfil }) => pacientes.listar(base(), busqueda, perfil))
-manejar('pacientes.obtener', ({ id }) => pacientes.obtener(base(), id))
-manejar('pacientes.guardar', (p) => pacientes.guardar(base(), p, profesionalId))
-manejar('catalogos.met', () => controles.actividades(base()))
-manejar('controles.listar', ({ pacienteId }) => controles.listar(base(), pacienteId))
-manejar('controles.crear', ({ pacienteId }) => ({ id: controles.crear(base(), pacienteId, profesionalId) }))
-manejar('controles.evolucion', ({ pacienteId }) => controles.evolucion(base(), pacienteId))
-manejar('controles.obtener', ({ id }) => controles.obtener(base(), id))
-manejar('controles.descartar', ({ id }) => {
-  controles.descartar(base(), id)
-  return null
-})
-manejar('controles.guardar', (c) => controles.guardar(base(), c, profesionalId))
+const canales = crearCanales(app.getPath('userData'))
+for (const canal of Object.keys(entradas)) ipcMain.handle(canal, (_evento, crudo) => canales.atender(canal, crudo))
 
 // Carpeta del último PDF guardado: el siguiente diálogo parte ahí y mismaCarpeta guarda sin preguntar.
 let carpetaPdf: string | null = null
 
 /** Guarda la ventana actual en PDF (lo que no se imprime lo oculta el CSS @media print de la pantalla). */
-manejar('archivos.guardarPdf', async ({ nombre, mismaCarpeta }) => {
+canales.manejar('archivos.guardarPdf', async ({ nombre, mismaCarpeta }) => {
   const ventana = BrowserWindow.getAllWindows()[0]
   const archivo = `${nombre.replace(/[\\/:*?"<>|]/g, '-')}.pdf`
   let ruta = mismaCarpeta && carpetaPdf ? join(carpetaPdf, archivo) : null
@@ -146,4 +58,4 @@ if (!app.requestSingleInstanceLock()) app.quit()
 app.on('second-instance', () => BrowserWindow.getAllWindows()[0]?.focus())
 app.whenReady().then(crearVentana)
 app.on('window-all-closed', () => app.quit())
-app.on('will-quit', () => db?.close())
+app.on('will-quit', canales.cerrar)

@@ -4,13 +4,18 @@ import type { ApiNutri, Canal, Entrada, Salidas } from '../../shared/contratos'
 
 declare global {
   interface Window {
-    nutri: ApiNutri
+    nutri?: ApiNutri
   }
+}
+
+// Sin Electron (modo web de prueba, src/main/web.ts) el mismo contrato viaja por HTTP.
+const api: ApiNutri = window.nutri ?? {
+  invocar: async (canal, entrada) => (await fetch(`/api/${canal}`, { method: 'POST', body: JSON.stringify({ entrada }) })).json()
 }
 
 /** Llama a un canal del backend; lanza Error con el mensaje legible si falla. */
 export async function llamar<C extends Canal>(canal: C, entrada: Entrada<C>): Promise<Salidas[C]> {
-  const r = await window.nutri.invocar(canal, entrada)
+  const r = await api.invocar(canal, entrada)
   if (!r.ok) throw new Error(r.error)
   return r.datos
 }

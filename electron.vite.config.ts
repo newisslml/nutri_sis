@@ -11,7 +11,8 @@ const csp = {
 }
 
 export default defineConfig({
-  main: {},
+  // web: modo web de prueba para AgenteQA (Dockerfile), comparte los canales con la app de escritorio.
+  main: { build: { rollupOptions: { input: { index: 'src/main/index.ts', web: 'src/main/web.ts' } } } },
   preload: {},
   renderer: { plugins: [react(), csp] }
 })

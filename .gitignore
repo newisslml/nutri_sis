@@ -11,3 +11,6 @@ claves.json
 
 # Planilla de trabajo del nutricionista: no va al repositorio
 FICHAMAESTRAWIN2026.xlsm
+
+# Datos del modo web de prueba (src/main/web.ts)
+datos-prueba/

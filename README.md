@@ -34,6 +34,17 @@ La ventana se ve en el escritorio del puerto 6080 (`http://localhost:6080`, cont
 
 Los datos que se creen en el contenedor (`~/.config/SistemaNutri`) son solo de prueba y se pierden al reconstruirlo. Los datos reales de pacientes no van al repositorio ni al contenedor.
 
+### Modo web de prueba (AgenteQA)
+
+El `Dockerfile` de la raíz levanta la app como página web, sin Electron, para pruebas automáticas con navegador (AgenteQA, Playwright): `src/main/web.ts` sirve la interfaz compilada y atiende los mismos canales del backend por `POST /api/<canal>`.
+
+```bash
+docker build -t sistema-nutri . && docker run --rm -p 8080:8080 sistema-nutri   # http://localhost:8080
+npm run build && node out/main/web.js                                             # sin Docker
+```
+
+Primer ingreso, qué probar, comportamiento esperado, API y el texto para el chat de AgenteQA: [`QA.md`](QA.md). Solo para pruebas: no usar con datos reales de pacientes.
+
 ## Datos
 
 - `%APPDATA%\SistemaNutri\nutri.db`: base SQLite cifrada (formato SQLCipher 4).
