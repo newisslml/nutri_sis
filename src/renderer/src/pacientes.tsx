@@ -6,12 +6,14 @@ import {
   Fieldset,
   Group,
   Loader,
+  Modal,
   NumberInput,
   Select,
   SimpleGrid,
   Stack,
   Switch,
   Table,
+  Text,
   Textarea,
   TextInput,
   Title,
@@ -139,7 +141,85 @@ export function FichaPaciente() {
     <Stack gap="xl">
       <FormularioPaciente inicial={paciente.data} />
       {paciente.data && <ListaControles pacienteId={paciente.data.id} />}
+      {paciente.data && <DerechosPaciente paciente={paciente.data} />}
     </Stack>
+  )
+}
+
+/** A pedido del paciente o su tutor (Ley 21.719): entregarle todos sus datos, o eliminarlos del sistema. */
+function DerechosPaciente({ paciente }: { paciente: Paciente }) {
+  const qc = useQueryClient()
+  const navegar = useNavigate()
+  const [eliminando, setEliminando] = useState(false)
+  const [confirmacion, setConfirmacion] = useState('')
+  const nombre = `${paciente.nombres} ${paciente.apellidos}`
+  const exportar = useMutation({
+    mutationFn: () => llamar('pacientes.exportar', { id: paciente.id }),
+    onSuccess: (datos) => {
+      // La descarga abre el diálogo de guardar (Electron y navegador).
+      const url = URL.createObjectURL(new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' }))
+      const enlace = document.createElement('a')
+      enlace.href = url
+      enlace.download = `Datos de ${nombre.replace(/[\\/:*?"<>|]/g, '-')} ${hoyISO()}.json`
+      enlace.click()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    }
+  })
+  const eliminar = useMutation({
+    mutationFn: () => llamar('pacientes.eliminar', { id: paciente.id }),
+    onSuccess: async () => {
+      qc.removeQueries({ queryKey: ['paciente', String(paciente.id)] })
+      await qc.invalidateQueries({ queryKey: ['pacientes'] })
+      navegar('/pacientes')
+    }
+  })
+  const cerrar = () => {
+    setEliminando(false)
+    setConfirmacion('')
+  }
+
+  return (
+    <Fieldset legend="Datos personales del paciente (Ley 21.719)" maw={900}>
+      <Stack>
+        <Text size="sm">
+          A pedido del paciente o de su tutor: entregarle todos sus datos (ficha, controles, pautas e historial de cambios) en un archivo, o
+          eliminarlos del sistema.
+        </Text>
+        <Group>
+          <Button variant="default" onClick={() => exportar.mutate()} loading={exportar.isPending}>
+            Exportar sus datos (JSON)
+          </Button>
+          <Button variant="outline" color="red" onClick={() => setEliminando(true)}>
+            Eliminar paciente…
+          </Button>
+        </Group>
+        {exportar.error && <Alert color="red">{exportar.error.message}</Alert>}
+        <Text size="xs" c="dimmed">
+          El archivo exportado no va cifrado: entréguelo directamente al paciente y no lo deje en el equipo.
+        </Text>
+      </Stack>
+      <Modal opened={eliminando} onClose={cerrar} title="Eliminar paciente" size="lg">
+        <Stack>
+          <Text size="sm">
+            Se borran la ficha de <b>{nombre}</b>, todos sus controles, rutinas, pautas y el historial de sus cambios. No se puede deshacer. En la
+            auditoría queda solo que se eliminó, quién y cuándo, sin sus datos.
+          </Text>
+          <Alert color="yellow">
+            Los respaldos ya hechos conservan sus datos hasta que se reemplacen por copias nuevas. Si el paciente pidió una copia, expórtela antes.
+          </Alert>
+          <TextInput
+            label="Para confirmar, escriba el nombre completo"
+            description={nombre}
+            value={confirmacion}
+            onChange={(e) => setConfirmacion(e.currentTarget.value)}
+          />
+          {eliminar.error && <Alert color="red">{eliminar.error.message}</Alert>}
+          <Button color="red" disabled={confirmacion.trim() !== nombre} loading={eliminar.isPending} onClick={() => eliminar.mutate()}>
+            Eliminar definitivamente
+          </Button>
+        </Stack>
+      </Modal>
+    </Fieldset>
   )
 }
 

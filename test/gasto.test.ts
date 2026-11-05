@@ -35,6 +35,15 @@ test('Cunningham (1980): 500 + 22 × masa libre de grasa', () => {
   assert.throws(() => calcularTMB('cunningham-1980', { pesoKg: 75, edad: 28, sexo: 'M' }), /Faltan datos.*masa libre de grasa/)
 })
 
+test('Katch-McArdle: 370 + 21,6 × masa libre de grasa', () => {
+  assert.equal(tmb('katch-mcardle', { pesoKg: 75, masaLibreGrasaKg: 60, edad: 28, sexo: 'M' }), 1666) // 370 + 1296
+  assert.equal(tmb('katch-mcardle', { pesoKg: 62, masaLibreGrasaKg: 45.5, edad: 35, sexo: 'F' }), 1353) // 370 + 982,8
+  assert.throws(() => calcularTMB('katch-mcardle', { pesoKg: 75, edad: 28, sexo: 'M' }), /Faltan datos.*masa libre de grasa/)
+  assert.deepEqual(calcularTMB('katch-mcardle', { pesoKg: 50, masaLibreGrasaKg: 40, edad: 15, sexo: 'F' }).avisos, [
+    'Katch-McArdle está validada en adultos'
+  ])
+})
+
 test('datos faltantes y población', () => {
   assert.throws(() => calcularTMB('mifflin-st-jeor', { pesoKg: 60, edad: 30, sexo: 'F' }), /Faltan datos.*talla/)
   assert.deepEqual(calcularTMB('mifflin-st-jeor', { pesoKg: 30, tallaCm: 135, edad: 9, sexo: 'M' }).avisos, [

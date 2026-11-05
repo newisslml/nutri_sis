@@ -1,4 +1,5 @@
-import type { Paciente, PacienteGuardar, PacienteResumen, Perfil } from '../shared/contratos'
+import type { ExportacionPaciente, Paciente, PacienteGuardar, PacienteResumen, Perfil } from '../shared/contratos'
+import * as controles from './controles'
 import { auditar, type DB } from './db'
 
 const SELECT = `SELECT id, rut, nombres, apellidos, fecha_nacimiento AS fechaNacimiento, sexo, perfil, disciplina,
@@ -74,4 +75,42 @@ export function guardar(db: DB, p: PacienteGuardar, profesionalId: number): Paci
     auditar(db, 'paciente', id, profesionalId, { ...anterior, sintomas: JSON.stringify(anterior.sintomas) }, campos)
   })()
   return obtener(db, id)
+}
+
+// Historial de cambios del paciente y de sus controles: guarda valores anteriores, así que también son sus datos.
+const SU_AUDITORIA = `(tabla = 'paciente' AND registro_id = @id) OR (tabla = 'control' AND registro_id IN (SELECT id FROM control WHERE paciente_id = @id))`
+
+/** Todos los datos del paciente: ficha, controles completos e historial de cambios. */
+export function exportar(db: DB, id: number): ExportacionPaciente {
+  const paciente = obtener(db, id)
+  const ids = db.prepare('SELECT id FROM control WHERE paciente_id = ? ORDER BY fecha, id').pluck().all(id) as number[]
+  return {
+    sistema: 'Sistema Nutri',
+    generado: new Date().toISOString(),
+    paciente,
+    controles: ids.map((c) => controles.obtener(db, c)),
+    auditoria: db
+      .prepare(
+        `SELECT fecha, tabla, registro_id AS registroId, campo, valor_anterior AS valorAnterior, valor_nuevo AS valorNuevo
+         FROM auditoria WHERE ${SU_AUDITORIA} ORDER BY id`
+      )
+      .all({ id }) as ExportacionPaciente['auditoria']
+  }
+}
+
+/**
+ * Elimina al paciente a su pedido: ficha, controles con sus rutinas e historial de cambios, sobrescritos en el archivo (secure_delete).
+ * En auditoría queda solo que se eliminó, quién y cuándo, sin sus datos. Los respaldos anteriores los conservan hasta que roten.
+ */
+export function eliminar(db: DB, id: number, profesionalId: number): void {
+  obtener(db, id) // falla si no existe
+  db.transaction(() => {
+    const n = db.prepare('SELECT count(*) FROM control WHERE paciente_id = ?').pluck().get(id) as number
+    db.prepare(`DELETE FROM auditoria WHERE ${SU_AUDITORIA}`).run({ id })
+    db.prepare('DELETE FROM control WHERE paciente_id = ?').run(id) // rutina_bloque se borra en cascada
+    db.prepare('DELETE FROM paciente WHERE id = ?').run(id)
+    db.prepare(
+      `INSERT INTO auditoria (tabla, registro_id, profesional_id, campo, valor_anterior, valor_nuevo) VALUES ('paciente', ?, ?, 'eliminado a pedido', ?, NULL)`
+    ).run(id, profesionalId, `${n} controles`)
+  })()
 }

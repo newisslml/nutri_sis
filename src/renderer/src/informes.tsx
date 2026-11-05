@@ -10,7 +10,8 @@ import {
   somatotipo,
   sumaPliegues,
   type DatosAntropometria,
-  type MetodoMusculo
+  type MetodoMusculo,
+  type SinResultado
 } from '../../calculo/antropometria'
 import {
   clasificarGrasa,
@@ -65,11 +66,15 @@ const Etiqueta = ({ c, sinDato = 'No aplica a esta edad' }: { c: Clasificacion |
       {sinDato}
     </Text>
   )
-const Falta = ({ faltan }: { faltan: string[] }) => (
-  <Text size="sm" c="dimmed">
-    Falta: {faltan.join(', ')}
-  </Text>
-)
+/** Por qué no hay resultado: la ecuación no aplica a este paciente (aviso) o faltan medidas. */
+export const Falta = ({ faltan, noAplica }: SinResultado) =>
+  noAplica ? (
+    <Alert color="yellow">{noAplica}</Alert>
+  ) : (
+    <Text size="sm" c="dimmed">
+      Falta: {faltan.join(', ')}
+    </Text>
+  )
 
 /** Evaluación con curvas de crecimiento (OMS y norma MINSAL); null desde los 19 años 1 mes. */
 const evaluar = (datos: DatosAntropometria, paciente: Paciente, fecha: string) =>
@@ -290,7 +295,7 @@ export function InformePentacompartimental({ datos, evolucion, ...resto }: Props
       <SimpleGrid cols={{ base: 1, md: 2 }}>
         <Seccion titulo="Composición corporal (Kerr, 1988)">
           {'faltan' in k ? (
-            <Falta faltan={k.faltan} />
+            <Falta {...k} />
           ) : (
             <Stack align="center">
               <Dona partes={masas.map(([nombre, m, color]) => ({ nombre, pct: k.resultado[m].pct, color }))} centro={`${decimal(datos.pesoKg)} kg`} />
@@ -364,8 +369,8 @@ export function InformePentacompartimental({ datos, evolucion, ...resto }: Props
           angosto
           extra={[
             ['Σ 8 pliegues', sumaMm(datos, PLIEGUES_8)],
-            ['Índice músculo/hueso', 'faltan' in k ? 'faltan medidas de Kerr' : kilos(k.resultado.muscular.kg / k.resultado.osea.kg)],
-            ['Índice adiposo/muscular', 'faltan' in k ? 'faltan medidas de Kerr' : kilos(k.resultado.adiposa.kg / k.resultado.muscular.kg)]
+            ['Índice músculo/hueso', 'faltan' in k ? (k.noAplica ? 'no aplica' : 'faltan medidas de Kerr') : kilos(k.resultado.muscular.kg / k.resultado.osea.kg)],
+            ['Índice adiposo/muscular', 'faltan' in k ? (k.noAplica ? 'no aplica' : 'faltan medidas de Kerr') : kilos(k.resultado.adiposa.kg / k.resultado.muscular.kg)]
           ]}
         />
       </SimpleGrid>
@@ -415,7 +420,7 @@ export function InformeBicompartimental({ datos, evolucion, ...resto }: Props) {
           onChange={(v) => setMetodo(v as MetodoMusculo)}
         />
         {'faltan' in bi ? (
-          <Falta faltan={bi.faltan} />
+          <Falta {...bi} />
         ) : (
           <Group align="center" gap="xl">
             <Dona partes={masas.map(([nombre, m, color]) => ({ nombre, pct: bi.resultado[m].pct, color }))} centro={`${decimal(datos.pesoKg)} kg`} />
@@ -449,7 +454,9 @@ export function InformeBicompartimental({ datos, evolucion, ...resto }: Props) {
                 </Table.Tbody>
               </Table>
               <Text size="sm" c="dimmed">
-                Grasa por Durnin-Womersley (4 pliegues) y Siri.
+                {bi.resultado.metodoGrasa === 'Slaughter'
+                  ? 'Grasa por Slaughter (tricipital + pantorrilla), la ecuación para menores de 17 años.'
+                  : 'Grasa por Durnin-Womersley (4 pliegues) y Siri.'}
               </Text>
               {bi.resultado.avisos.map((a) => (
                 <Alert key={a} color="yellow">
@@ -489,7 +496,7 @@ export function InformeBicompartimental({ datos, evolucion, ...resto }: Props) {
         extra={[
           [
             'Índice adiposo/muscular',
-            'resultado' in bi ? kilos(bi.resultado.grasa.kg / bi.resultado.muscular.kg) : 'faltan medidas'
+            'resultado' in bi ? kilos(bi.resultado.grasa.kg / bi.resultado.muscular.kg) : bi.noAplica ? 'no aplica' : 'faltan medidas'
           ]
         ]}
       />

@@ -95,3 +95,13 @@
     transition: none !important;
   }
 }
+
+/* El engranaje da un cuarto de vuelta. */
+.icono-animado:hover .engranaje {
+  animation: engranaje 0.5s ease-in-out;
+}
+@keyframes engranaje {
+  to {
+    transform: rotate(90deg);
+  }
+}

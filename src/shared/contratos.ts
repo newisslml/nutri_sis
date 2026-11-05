@@ -1,7 +1,8 @@
 // Contrato entre frontend y backend: esquemas de entrada (Zod) y tipos de salida por canal.
 import { z } from 'zod'
 import { GRUPOS, type Medidas } from '../calculo/antropometria'
-import { ADICIONAL, type EntradaGasto, type EstadoFisiologico, type ResultadoGasto } from '../calculo/gasto'
+import { FORMULAS } from '../calculo/formulas'
+import { ADICIONAL, GRUPOS_JUVENILES, type EntradaGasto, type EstadoFisiologico, type ResultadoGasto } from '../calculo/gasto'
 import { CODIGOS } from '../calculo/intercambio'
 import { edadEnAnios, formatearRut, hoyISO, validarRut } from './validaciones'
 
@@ -97,6 +98,49 @@ export type Paciente = Omit<PacienteGuardar, 'id'> & { id: number; consentimient
 export type PacienteResumen = Pick<Paciente, 'id' | 'rut' | 'fechaNacimiento' | 'sexo' | 'perfil'> & { nombre: string }
 
 export type ActividadMet = { id: number; codigo: string | null; categoria: string; nombre: string; met: number; estimado: boolean; poblacion: string }
+/** Poblaciones de la tabla MET: adultos, los grupos de edad del compendio juvenil y mayores de 60. */
+export const POBLACIONES_MET = ['adulto', ...GRUPOS_JUVENILES, '60+'] as [string, ...string[]]
+const actividadMet = z.object({
+  id: z.number().int().positive().optional(),
+  codigo: z
+    .string()
+    .trim()
+    .transform((s) => (s === '' ? null : s)),
+  categoria: z.string().trim().min(1, 'Indique la categoría'),
+  nombre: z.string().trim().min(1, 'Indique la actividad'),
+  met: z.number('Ingrese el MET').min(0.5, 'MET mínimo 0,5').max(25, 'MET máximo 25'),
+  poblacion: z.enum(POBLACIONES_MET, 'Elija la población')
+})
+export type ActividadMetFormulario = z.input<typeof actividadMet>
+export type ActividadMetGuardar = z.output<typeof actividadMet>
+
+const idsFormula = FORMULAS.map((f) => f.id) as [string, ...string[]]
+/** Preferencias del profesional (tabla configuracion). Las de cálculo valen para el primer control de cada paciente; los siguientes copian el anterior. */
+export const configuracion = z.object({
+  formulaAdulto: z.enum(idsFormula), // desde los 19 años
+  formulaMenor: z.enum(idsFormula),
+  modo: z.enum(['estandar', 'tmb']),
+  metReposo: z.number().min(0.9, 'MET de reposo mínimo 0,9').max(3, 'MET de reposo máximo 3'),
+  eta: z.boolean(),
+  carpetaRespaldo: z.string().nullable(), // null: carpeta "respaldos" junto a los datos
+  copiasRespaldo: z.number('Indique cuántas copias').int().min(1, 'Guarde al menos 1 copia').max(100, 'Máximo 100 copias'),
+  minutosBloqueo: z.number('Indique los minutos').int().min(0).max(240, 'Máximo 240 minutos') // 0: no se bloquea solo
+})
+export type Configuracion = z.output<typeof configuracion>
+// MET de reposo 1,3: sentado tranquilo (07021). ETA apagado para no duplicarlo con los MET.
+export const CONFIGURACION_INICIAL: Configuracion = {
+  formulaAdulto: 'mifflin-st-jeor',
+  formulaMenor: 'fao-oms-unu-schofield',
+  modo: 'estandar',
+  metReposo: 1.3,
+  eta: false,
+  carpetaRespaldo: null,
+  copiasRespaldo: 10,
+  minutosBloqueo: 15
+}
+
+/** Un respaldo en disco; fecha local AAAA-MM-DDTHH:MM:SS. */
+export type Respaldo = { carpeta: string; fecha: string; bytes: number }
 
 const bloqueRutina = z.object({
   actividadId: z.number().int().positive().nullable(),
@@ -207,7 +251,16 @@ export type Control = Omit<ControlGuardar, 'pesoKg'> & {
 }
 export type ControlResumen = Pick<Control, 'id' | 'fecha' | 'pesoKg' | 'tallaCm' | 'edadMeses' | 'motivo'> & { promedioKcal: number | null }
 /** Lo que el informe antropométrico necesita de cada control con peso para graficar la evolución. */
-export type EvolucionControl = Pick<Control, 'id' | 'fecha' | 'tallaCm' | 'antropometria'> & { pesoKg: number }
+export type EvolucionControl = Pick<Control, 'id' | 'fecha' | 'tallaCm' | 'antropometria' | 'estado'> & { pesoKg: number }
+
+/** Todo lo que el sistema guarda de un paciente, para entregárselo si lo pide (Ley 21.719). */
+export type ExportacionPaciente = {
+  sistema: string
+  generado: string
+  paciente: Paciente
+  controles: Control[]
+  auditoria: { fecha: string; tabla: string; registroId: number; campo: string; valorAnterior: string | null; valorNuevo: string | null }[]
+}
 
 /** Arma la entrada del motor igual en la pantalla (cálculo en vivo) y en el backend (cálculo que se guarda). */
 export function entradaGasto(c: ControlGuardar, p: Pick<Paciente, 'fechaNacimiento' | 'sexo'>): EntradaGasto {
@@ -235,30 +288,63 @@ export const entradas = {
     nombreProfesional: z.string().trim().min(1, 'Requerido'),
     contrasena: z.string().min(8, 'Mínimo 8 caracteres')
   }),
-  'sesion.desbloquear': z.object({ secreto: z.string().min(1, 'Requerido') }),
+  // recordar: true guarda la clave en este equipo (safeStorage), false la olvida, sin valor no cambia nada.
+  'sesion.desbloquear': z.object({ secreto: z.string().min(1, 'Requerido'), recordar: z.boolean().optional() }),
   'sesion.bloquear': z.undefined(),
+  'sesion.cambiarContrasena': z.object({
+    actual: z.string().min(1, 'Requerido'),
+    nueva: z.string().min(8, 'Mínimo 8 caracteres')
+  }),
+  'sesion.olvidarEquipo': z.undefined(),
+  'configuracion.obtener': z.undefined(),
+  'configuracion.guardar': configuracion,
+  // carpeta null: la configurada. Puede ser un respaldo o la carpeta que los contiene.
+  'respaldo.listar': z.object({ carpeta: z.string().nullable() }),
+  'respaldo.crear': z.undefined(),
+  'respaldo.restaurar': z.object({ carpeta: z.string().min(1), secreto: z.string().min(1, 'Requerido') }),
   'pacientes.listar': z.object({ busqueda: z.string().trim(), perfil: z.enum(PERFILES).nullable() }),
   'pacientes.obtener': z.object({ id: z.number().int().positive() }),
   'pacientes.guardar': pacienteEntrada,
+  'pacientes.exportar': z.object({ id: z.number().int().positive() }),
+  'pacientes.eliminar': z.object({ id: z.number().int().positive() }),
   'catalogos.met': z.undefined(),
+  'catalogos.guardarMet': actividadMet,
+  'catalogos.eliminarMet': z.object({ id: z.number().int().positive() }),
+  'demo.crear': z.undefined(),
+  'demo.eliminar': z.undefined(),
   'controles.listar': z.object({ pacienteId: z.number().int().positive() }),
   'controles.crear': z.object({ pacienteId: z.number().int().positive() }),
   'controles.evolucion': z.object({ pacienteId: z.number().int().positive() }),
   'controles.obtener': z.object({ id: z.number().int().positive() }),
   'controles.descartar': z.object({ id: z.number().int().positive() }),
   'controles.guardar': controlGuardar,
-  'archivos.guardarPdf': z.object({ nombre: z.string().trim().min(1), mismaCarpeta: z.boolean().optional() })
+  'archivos.guardarPdf': z.object({ nombre: z.string().trim().min(1), mismaCarpeta: z.boolean().optional() }),
+  'archivos.elegirCarpeta': z.object({ titulo: z.string() })
 }
 
 export type Salidas = {
-  'sesion.estado': { configurada: boolean; abierta: boolean; profesional: string | null }
+  // recordarDisponible: el equipo puede guardar la clave cifrada (app de escritorio); recordada: ya la tiene guardada.
+  'sesion.estado': { configurada: boolean; abierta: boolean; profesional: string | null; recordarDisponible: boolean; recordada: boolean }
   'sesion.configurar': { claveRecuperacion: string }
   'sesion.desbloquear': null
   'sesion.bloquear': null
+  'sesion.cambiarContrasena': null
+  'sesion.olvidarEquipo': null
+  'configuracion.obtener': Configuracion
+  'configuracion.guardar': Configuracion
+  'respaldo.listar': { carpeta: string; respaldos: Respaldo[] }
+  'respaldo.crear': { ruta: string | null } // null: no hubo cambios desde el último
+  'respaldo.restaurar': null
   'pacientes.listar': PacienteResumen[]
   'pacientes.obtener': Paciente
   'pacientes.guardar': Paciente
+  'pacientes.exportar': ExportacionPaciente
+  'pacientes.eliminar': null
   'catalogos.met': ActividadMet[]
+  'catalogos.guardarMet': ActividadMet
+  'catalogos.eliminarMet': null
+  'demo.crear': { pacientes: number }
+  'demo.eliminar': { pacientes: number }
   'controles.listar': ControlResumen[]
   'controles.crear': { id: number }
   'controles.evolucion': EvolucionControl[]
@@ -266,6 +352,7 @@ export type Salidas = {
   'controles.descartar': null
   'controles.guardar': Control
   'archivos.guardarPdf': string | null // ruta del PDF, o null si se canceló
+  'archivos.elegirCarpeta': string | null // null si se canceló
 }
 
 export type Canal = keyof typeof entradas

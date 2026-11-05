@@ -34,8 +34,10 @@ import {
   PLIEGUES_4,
   PLIEGUES_6,
   PLIEGUES_8,
+  EDAD_DURNIN,
   durninWomersley,
   kerr,
+  slaughter,
   sumaPliegues,
   tallaChumlea,
   type DatosAntropometria,
@@ -58,7 +60,7 @@ import { edadEnAnios, edadEnMeses, formatearEdad } from '../../shared/validacion
 import { ArmadorPauta, PanelObjetivo, PestanaRecordatorio, requerimientosSemana } from './alimentacion'
 import { llamar, useCambiosPendientes } from './api'
 import { decimal, fechaCL, kcal, kilos } from './formato'
-import { InformeBicompartimental, InformePentacompartimental, type PuntoEvolucion } from './informes'
+import { Falta, InformeBicompartimental, InformePentacompartimental, type PuntoEvolucion } from './informes'
 import { PautaPaciente } from './pauta'
 
 /** 450 → "7 h 30 min", 45 → "45 min", 120 → "2 h" */
@@ -259,23 +261,44 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
   }
   const minutosDia = b.semana[dia].reduce((s, x) => s + x.minutos, 0)
   const indice = imc(b.pesoKg, b.tallaCm)
+  const gestante = (estado: string | null) => estado?.startsWith('gestacion') ?? false
   const datosAntropometria: DatosAntropometria | null =
-    b.pesoKg && b.tallaCm && edad !== null ? { pesoKg: b.pesoKg, tallaCm: b.tallaCm, edad, sexo: paciente.sexo, medidas: b.antropometria } : null
+    b.pesoKg && b.tallaCm && edad !== null
+      ? { pesoKg: b.pesoKg, tallaCm: b.tallaCm, edad, sexo: paciente.sexo, medidas: b.antropometria, gestante: gestante(b.estado) }
+      : null
   // ponytail: composición en vivo desde las medidas, no se congela al guardar; congelar con id y versión como el gasto cuando se fijen las ecuaciones.
-  const composicion = datosAntropometria && { kerr: kerr(datosAntropometria), durnin: durninWomersley(datosAntropometria) }
+  // La grasa de dos compartimientos es Durnin-Womersley desde los 17 años y Slaughter antes.
+  const composicion = datosAntropometria && {
+    kerr: kerr(datosAntropometria),
+    ...(datosAntropometria.edad < EDAD_DURNIN
+      ? { grasa: slaughter(datosAntropometria), metodoGrasa: 'Slaughter (tricipital + pantorrilla)' }
+      : { grasa: durninWomersley(datosAntropometria), metodoGrasa: 'Durnin-Womersley + Siri' })
+  }
   const historial = useQuery({ queryKey: ['evolucion', paciente.id], queryFn: () => llamar('controles.evolucion', { pacienteId: paciente.id }) })
   // El control abierto entra con lo que se está editando; los demás, como quedaron guardados.
   const evolucion = useMemo<PuntoEvolucion[]>(() => {
     const guardados = (historial.data ?? []).filter((c) => c.id !== b.id).map((c) => ({ ...c, medidas: c.antropometria }))
-    const abierto = fechaValida ? [{ fecha: b.fecha, pesoKg: b.pesoKg, tallaCm: b.tallaCm, medidas: b.antropometria }] : []
+    const abierto = fechaValida ? [{ fecha: b.fecha, pesoKg: b.pesoKg, tallaCm: b.tallaCm, medidas: b.antropometria, estado: b.estado }] : []
     return [...guardados, ...abierto]
       .sort((x, y) => x.fecha.localeCompare(y.fecha))
       .flatMap((c) =>
         c.pesoKg && c.tallaCm
-          ? [{ fecha: c.fecha, datos: { pesoKg: c.pesoKg, tallaCm: c.tallaCm, edad: edadEnAnios(paciente.fechaNacimiento, c.fecha), sexo: paciente.sexo, medidas: c.medidas } }]
+          ? [
+              {
+                fecha: c.fecha,
+                datos: {
+                  pesoKg: c.pesoKg,
+                  tallaCm: c.tallaCm,
+                  edad: edadEnAnios(paciente.fechaNacimiento, c.fecha),
+                  sexo: paciente.sexo,
+                  medidas: c.medidas,
+                  gestante: gestante(c.estado)
+                }
+              }
+            ]
           : []
       )
-  }, [historial.data, b.id, b.fecha, b.pesoKg, b.tallaCm, b.antropometria, fechaValida, paciente])
+  }, [historial.data, b.id, b.fecha, b.pesoKg, b.tallaCm, b.antropometria, b.estado, fechaValida, paciente])
   const informe = {
     datos: datosAntropometria,
     paciente,
@@ -790,9 +813,7 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                 <Stack gap="sm">
                   <Text fw={600}>Kerr (5 componentes)</Text>
                   {'faltan' in composicion.kerr ? (
-                    <Text size="sm" c="dimmed">
-                      Falta: {composicion.kerr.faltan.join(', ')}
-                    </Text>
+                    <Falta {...composicion.kerr} />
                   ) : (
                     <>
                       <Table>
@@ -828,21 +849,19 @@ function EditorControl({ inicial, paciente, actividades }: { inicial: Control; p
                       </Text>
                     </>
                   )}
-                  <Text fw={600}>Durnin-Womersley + Siri</Text>
-                  {'faltan' in composicion.durnin ? (
-                    <Text size="sm" c="dimmed">
-                      Falta: {composicion.durnin.faltan.join(', ')}
-                    </Text>
+                  <Text fw={600}>{composicion.metodoGrasa}</Text>
+                  {'faltan' in composicion.grasa ? (
+                    <Falta {...composicion.grasa} />
                   ) : (
                     <>
                       <Text>
-                        Grasa: <b>{decimal(composicion.durnin.resultado.grasaPct)} %</b> ({kilos(composicion.durnin.resultado.grasaKg)} kg)
+                        Grasa: <b>{decimal(composicion.grasa.resultado.grasaPct)} %</b> ({kilos(composicion.grasa.resultado.grasaKg)} kg)
                         <Text span c="dimmed" size="sm">
                           {' '}
-                          · masa libre de grasa {kilos(composicion.durnin.resultado.masaLibreGrasaKg)} kg
+                          · masa libre de grasa {kilos(composicion.grasa.resultado.masaLibreGrasaKg)} kg
                         </Text>
                       </Text>
-                      {composicion.durnin.resultado.avisos.map((a) => (
+                      {composicion.grasa.resultado.avisos.map((a) => (
                         <Alert key={a} color="yellow">
                           {a}
                         </Alert>

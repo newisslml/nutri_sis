@@ -12,6 +12,9 @@ const canales = crearCanales(carpeta)
 canales.manejar('archivos.guardarPdf', () => {
   throw new Error('El PDF solo se genera en la app de escritorio')
 })
+canales.manejar('archivos.elegirCarpeta', () => {
+  throw new Error('Elegir carpetas solo funciona en la app de escritorio')
+})
 
 const RAIZ = resolve(__dirname, '../renderer')
 const TIPOS: Record<string, string> = {

@@ -48,12 +48,12 @@ export const textoPorciones = (p: Porciones) =>
     .map((c) => `${cantidad(p[c]!)} ${c}`)
     .join(' · ')
 
-/** Kerr si están todas sus medidas; si no, Durnin-Womersley con el músculo estimado. */
+/** Kerr si están todas sus medidas; si no, bicompartimental (Durnin-Womersley, o Slaughter bajo 17 años) con el músculo estimado. */
 function composicion(d: DatosAntropometria): { metodo: string; nombreGrasa: string; grasa: Componente; musculo: Componente } | null {
   const k = kerr(d)
   if (!('faltan' in k)) return { metodo: 'Kerr, 5 componentes', nombreGrasa: 'Masa adiposa', grasa: k.resultado.adiposa, musculo: k.resultado.muscular }
   const b = bicompartimental(d)
-  if (!('faltan' in b)) return { metodo: 'Durnin-Womersley', nombreGrasa: 'Masa grasa', grasa: b.resultado.grasa, musculo: b.resultado.muscular }
+  if (!('faltan' in b)) return { metodo: b.resultado.metodoGrasa, nombreGrasa: 'Masa grasa', grasa: b.resultado.grasa, musculo: b.resultado.muscular }
   return null
 }
 

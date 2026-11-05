@@ -110,7 +110,14 @@ export const PLIEGUES_8 = Object.keys(GRUPOS.pliegues.sitios) as Sitio<'pliegues
 export const tallaChumlea = (alturaRodillaCm: number, edad: number, sexo: Sexo) =>
   sexo === 'M' ? 64.19 - 0.04 * edad + 2.02 * alturaRodillaCm : 84.88 - 0.24 * edad + 1.83 * alturaRodillaCm
 
-export type DatosAntropometria = { pesoKg: number; tallaCm: number; edad: number; sexo: Sexo; medidas: Medidas }
+// gestante: control en gestación. Ahí las ecuaciones de pliegues no aplican y se bloquean.
+export type DatosAntropometria = { pesoKg: number; tallaCm: number; edad: number; sexo: Sexo; medidas: Medidas; gestante?: boolean }
+/** Sin resultado: faltan medidas, o la ecuación no aplica a este paciente (noAplica explica por qué; faltan queda vacío). */
+export type SinResultado = { faltan: string[]; noAplica?: string }
+const EN_GESTACION: SinResultado = {
+  faltan: [],
+  noAplica: 'No aplica en la gestación: la retención de líquido y los cambios de la grasa corporal invalidan las ecuaciones de pliegues'
+}
 export type Componente = { kg: number; pct: number }
 export type ResultadoKerr = {
   adiposa: Componente
@@ -137,7 +144,8 @@ const REQUIERE_KERR: Requisitos = {
  * Fuente: Kerr DA. An anthropometric method for fractionation of skin, adipose, bone, muscle and residual tissue masses
  * in males and females age 6 to 77 years [tesis]. Simon Fraser University; 1988.
  */
-export function kerr(d: DatosAntropometria): { resultado: ResultadoKerr } | { faltan: string[] } {
+export function kerr(d: DatosAntropometria): { resultado: ResultadoKerr } | SinResultado {
+  if (d.gestante) return EN_GESTACION
   const { basicos: b, pliegues: pl, perimetros: pe, diametros: di } = d.medidas
   const faltan = faltanSitios(d.medidas, REQUIERE_KERR)
   if (faltan.length) return { faltan }
@@ -186,24 +194,47 @@ export function kerr(d: DatosAntropometria): { resultado: ResultadoKerr } | { fa
   }
 }
 
-export type ResultadoDurnin = { densidad: number; grasaPct: number; grasaKg: number; masaLibreGrasaKg: number; avisos: string[] }
+export type ResultadoGrasa = { grasaPct: number; grasaKg: number; masaLibreGrasaKg: number; avisos: string[] }
+export type ResultadoDurnin = ResultadoGrasa & { densidad: number }
+
+/** Edad desde la que se usa Durnin-Womersley; antes, Slaughter. */
+export const EDAD_DURNIN = 17
 
 /**
  * Densidad corporal por Durnin y Womersley (ecuación general de 17 a 72 años, Σ4 pliegues) y % de grasa por Siri.
+ * Bajo 17 años no aplica (se usa Slaughter); sobre 72 calcula con aviso.
  * Fuentes: Durnin JV, Womersley J. Br J Nutr. 1974;32(1):77-97. Siri WE. Techniques for measuring body composition. 1961.
  */
-export function durninWomersley(d: DatosAntropometria): { resultado: ResultadoDurnin } | { faltan: string[] } {
+export function durninWomersley(d: DatosAntropometria): { resultado: ResultadoDurnin } | SinResultado {
+  if (d.gestante) return EN_GESTACION
+  if (d.edad < EDAD_DURNIN) return { faltan: [], noAplica: `Durnin-Womersley no aplica bajo los ${EDAD_DURNIN} años: se usa Slaughter` }
   const suma = sumaPliegues(d.medidas, PLIEGUES_4)
   if ('faltan' in suma) return suma
   const densidad = d.sexo === 'M' ? 1.1765 - 0.0744 * Math.log10(suma.mm) : 1.1567 - 0.0717 * Math.log10(suma.mm)
   const grasaPct = 495 / densidad - 450
   const grasaKg = (grasaPct / 100) * d.pesoKg
-  const avisos = d.edad < 17 || d.edad > 72 ? ['Durnin-Womersley está validada de 17 a 72 años'] : []
+  const avisos = d.edad > 72 ? ['Durnin-Womersley está validada de 17 a 72 años'] : []
   return { resultado: { densidad, grasaPct, grasaKg, masaLibreGrasaKg: d.pesoKg - grasaKg, avisos } }
 }
 
+/**
+ * % de grasa en niños y adolescentes por Slaughter et al. con tricipital + pantorrilla, la ecuación que no pide el grado de
+ * maduración sexual: hombres 0,735 × Σ + 1,0; mujeres 0,610 × Σ + 5,1. Validada de 8 a 18 años.
+ * Fuente: Slaughter MH, Lohman TG, Boileau RA, et al. Skinfold equations for estimation of body fatness in children and youth.
+ * Hum Biol. 1988;60(5):709-23.
+ */
+export function slaughter(d: DatosAntropometria): { resultado: ResultadoGrasa } | SinResultado {
+  if (d.gestante) return EN_GESTACION
+  const suma = sumaPliegues(d.medidas, ['tricipital', 'pantorrilla'])
+  if ('faltan' in suma) return suma
+  const grasaPct = d.sexo === 'M' ? 0.735 * suma.mm + 1 : 0.61 * suma.mm + 5.1
+  const grasaKg = (grasaPct / 100) * d.pesoKg
+  const avisos = d.edad < 8 || d.edad > 18 ? ['Slaughter está validada de 8 a 18 años'] : []
+  return { resultado: { grasaPct, grasaKg, masaLibreGrasaKg: d.pesoKg - grasaKg, avisos } }
+}
+
 export type MetodoMusculo = 'estimado' | 'lee'
-export type ResultadoBi = { grasa: Componente; muscular: Componente; residual: Componente; avisos: string[] }
+export type ResultadoBi = { metodoGrasa: string; grasa: Componente; muscular: Componente; residual: Componente; avisos: string[] }
 
 const REQUIERE_LEE: Requisitos = {
   pliegues: ['tricipital', 'musloFrontal', 'pantorrilla'],
@@ -211,18 +242,20 @@ const REQUIERE_LEE: Requisitos = {
 }
 
 /**
- * Modelo de 3 masas: grasa (Durnin-Womersley + Siri), músculo y residual/óseo (lo que resta del peso).
+ * Modelo de 3 masas: grasa (Durnin-Womersley + Siri; bajo 17 años, Slaughter), músculo y residual/óseo (lo que resta del peso).
  * Músculo "estimado" = 0,56 × masa libre de grasa, como la hoja EVAL. "lee" = ecuación de Lee et al. con perímetros
  * corregidos por pliegue, para raza blanca o hispana (término de raza 0); la hoja multiplica todo el paréntesis por 2,4
  * y usa 0,0044 en vez de 0,00441, aquí va como se publicó. Para el muslo usa el perímetro máximo, igual que la hoja.
  * Fuente: Lee RC et al. Am J Clin Nutr. 2000;72(3):796-803.
  */
-export function bicompartimental(d: DatosAntropometria, metodo: MetodoMusculo = 'estimado'): { resultado: ResultadoBi } | { faltan: string[] } {
-  const dw = durninWomersley(d)
+export function bicompartimental(d: DatosAntropometria, metodo: MetodoMusculo = 'estimado'): { resultado: ResultadoBi } | SinResultado {
+  const nino = d.edad < EDAD_DURNIN
+  const dw = nino ? slaughter(d) : durninWomersley(d)
   if ('faltan' in dw) return dw
   const { grasaKg, grasaPct, masaLibreGrasaKg } = dw.resultado
   const avisos = [...dw.resultado.avisos]
   let muscularKg = 0.56 * masaLibreGrasaKg
+  if (nino && metodo === 'estimado') avisos.push('El músculo como 0,56 × masa libre de grasa se estimó en adultos')
   if (metodo === 'lee') {
     const faltan = faltanSitios(d.medidas, REQUIERE_LEE)
     if (faltan.length) return { faltan }
@@ -243,7 +276,15 @@ export function bicompartimental(d: DatosAntropometria, metodo: MetodoMusculo = 
   const residualKg = d.pesoKg - grasaKg - muscularKg
   if (residualKg < 0) avisos.push('La masa muscular supera la masa libre de grasa: revise las medidas')
   const componente = (kg: number): Componente => ({ kg, pct: (kg / d.pesoKg) * 100 })
-  return { resultado: { grasa: { kg: grasaKg, pct: grasaPct }, muscular: componente(muscularKg), residual: componente(residualKg), avisos } }
+  return {
+    resultado: {
+      metodoGrasa: nino ? 'Slaughter' : 'Durnin-Womersley + Siri',
+      grasa: { kg: grasaKg, pct: grasaPct },
+      muscular: componente(muscularKg),
+      residual: componente(residualKg),
+      avisos
+    }
+  }
 }
 
 export type ResultadoSomatotipo = { endo: number; meso: number; ecto: number; x: number; y: number }
@@ -259,7 +300,8 @@ const REQUIERE_SOMATOTIPO: Requisitos = {
  * (la hoja sigue la recta del tramo anterior y puede dar negativa). Coordenadas de la somatocarta: x = ecto − endo, y = 2 meso − (endo + ecto).
  * Fuente: Carter JEL, Heath BH. Somatotyping: development and applications. Cambridge University Press; 1990.
  */
-export function somatotipo(d: DatosAntropometria): { resultado: ResultadoSomatotipo } | { faltan: string[] } {
+export function somatotipo(d: DatosAntropometria): { resultado: ResultadoSomatotipo } | SinResultado {
+  if (d.gestante) return EN_GESTACION
   const faltan = faltanSitios(d.medidas, REQUIERE_SOMATOTIPO)
   if (faltan.length) return { faltan }
   const { pliegues: pl, perimetros: pe, diametros: di } = d.medidas

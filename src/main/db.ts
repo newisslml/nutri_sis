@@ -1,11 +1,12 @@
 // Base SQLite cifrada en formato SQLCipher v4 (abrible con DB Browser for SQLite si hace falta).
 // Migraciones: una entrada por cambio de esquema; PRAGMA user_version guarda cuántas se aplicaron.
-import Database from 'better-sqlite3-multiple-ciphers'
+import type Database from 'better-sqlite3-multiple-ciphers'
 import { copyFileSync, existsSync } from 'node:fs'
 import compendio from '../../MET.md?raw'
 import compendioMayor from '../../MET60.md?raw'
 import compendioJuvenil from '../../METy.md?raw'
 import { GRUPOS_JUVENILES } from '../calculo/gasto'
+import { abrirCifrada } from './claves'
 import { parsearCompendio } from './compendio'
 
 export type DB = Database.Database
@@ -129,7 +130,8 @@ const MIGRACIONES: (string | ((db: DB) => void))[] = [
   },
   `ALTER TABLE paciente ADD COLUMN semanas_gestacion INTEGER; -- al nacer; bajo 37 las curvas usan la edad corregida
    ALTER TABLE paciente ADD COLUMN peso_nacer_g INTEGER;`,
-  'ALTER TABLE control ADD COLUMN semana_embarazo INTEGER; -- semanas cumplidas de la gestación en curso, para la curva de Atalah'
+  'ALTER TABLE control ADD COLUMN semana_embarazo INTEGER; -- semanas cumplidas de la gestación en curso, para la curva de Atalah',
+  'CREATE TABLE configuracion (clave TEXT PRIMARY KEY, valor TEXT NOT NULL); -- valor en JSON; claves y valores por defecto en shared/contratos.ts'
 ]
 
 /** Registra en auditoría cada campo cuyo valor cambió, con quién y cuándo. */
@@ -150,16 +152,17 @@ export function auditar(
   }
 }
 
+/** Versión del esquema que esta versión del sistema sabe abrir; un respaldo más nuevo no se restaura. */
+export const VERSION_ESQUEMA = MIGRACIONES.length
+
 /** Abre (o crea) la base con la clave. Lanza error si la clave no corresponde. */
 export function abrirBase(ruta: string, clave: Buffer): DB {
   const existia = existsSync(ruta)
-  const db = new Database(ruta)
+  const db = abrirCifrada(ruta, clave) // falla aquí si la clave es incorrecta
   try {
-    db.pragma(`cipher = 'sqlcipher'`)
-    db.pragma('legacy = 4')
-    db.key(clave)
-    const version = db.pragma('user_version', { simple: true }) as number // falla aquí si la clave es incorrecta
+    const version = db.pragma('user_version', { simple: true }) as number
     db.pragma('foreign_keys = ON')
+    db.pragma('secure_delete = ON') // lo borrado se sobrescribe en el archivo, no queda en páginas libres
     if (version < MIGRACIONES.length) {
       if (existia) copyFileSync(ruta, `${ruta}.antes-v${version + 1}.bak`) // copia cifrada antes de migrar
       db.transaction(() => {

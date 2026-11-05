@@ -4,6 +4,8 @@ import {
   entradaGasto,
   pautaVacia,
   type ActividadMet,
+  type ActividadMetGuardar,
+  type Configuracion,
   type Control,
   type ControlGuardar,
   type ControlResumen,
@@ -12,11 +14,54 @@ import {
 import { edadEnMeses, hoyISO } from '../shared/validaciones'
 import { auditar, type DB } from './db'
 
+const SELECT_ACTIVIDAD = 'SELECT id, codigo, categoria, nombre, met, estimado, poblacion FROM actividad_met'
+const actividad = (a: unknown) => ({ ...(a as ActividadMet), estimado: (a as { estimado: number }).estimado === 1 })
+
 export function actividades(db: DB): ActividadMet[] {
-  return db
-    .prepare('SELECT id, codigo, categoria, nombre, met, estimado, poblacion FROM actividad_met ORDER BY codigo, nombre')
-    .all()
-    .map((a) => ({ ...(a as ActividadMet), estimado: (a as { estimado: number }).estimado === 1 }))
+  return db.prepare(`${SELECT_ACTIVIDAD} ORDER BY codigo, nombre`).all().map(actividad)
+}
+
+/**
+ * Agrega o corrige una actividad de la tabla MET. Los controles guardados no cambian: sus rutinas copian nombre y MET.
+ * Una fila del compendio editada queda con "(editada)" en la fuente.
+ */
+export function guardarActividad(db: DB, a: ActividadMetGuardar, profesionalId: number): ActividadMet {
+  const campos = { codigo: a.codigo, categoria: a.categoria, nombre: a.nombre, met: a.met, poblacion: a.poblacion }
+  if (a.id === undefined) {
+    const { lastInsertRowid } = db
+      .prepare(
+        `INSERT INTO actividad_met (codigo, categoria, nombre, met, poblacion, fuente)
+         VALUES (@codigo, @categoria, @nombre, @met, @poblacion, 'Agregada por el profesional')`
+      )
+      .run(campos)
+    return actividad(db.prepare(`${SELECT_ACTIVIDAD} WHERE id = ?`).get(lastInsertRowid))
+  }
+  const anterior = db.prepare('SELECT codigo, categoria, nombre, met, poblacion FROM actividad_met WHERE id = ?').get(a.id) as
+    | typeof campos
+    | undefined
+  if (!anterior) throw new Error('Actividad no encontrada')
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE actividad_met SET codigo = @codigo, categoria = @categoria, nombre = @nombre, met = @met, poblacion = @poblacion,
+         fuente = CASE WHEN fuente LIKE '%(editada)' OR fuente = 'Agregada por el profesional' THEN fuente ELSE fuente || ' (editada)' END
+       WHERE id = @id`
+    ).run({ ...campos, id: a.id })
+    auditar(db, 'actividad_met', a.id!, profesionalId, anterior, campos)
+  })()
+  return actividad(db.prepare(`${SELECT_ACTIVIDAD} WHERE id = ?`).get(a.id))
+}
+
+/** Solo se elimina una actividad que ninguna rutina guardada usa; si no, se corrige su nombre o MET. */
+export function eliminarActividad(db: DB, id: number, profesionalId: number): void {
+  const anterior = db.prepare('SELECT nombre FROM actividad_met WHERE id = ?').get(id) as { nombre: string } | undefined
+  if (!anterior) throw new Error('Actividad no encontrada')
+  if (db.prepare('SELECT 1 FROM rutina_bloque WHERE actividad_id = ? LIMIT 1').get(id)) {
+    throw new Error('La actividad se usa en rutinas de controles: no se puede eliminar, pero sí corregir su nombre o MET')
+  }
+  db.transaction(() => {
+    db.prepare('DELETE FROM actividad_met WHERE id = ?').run(id)
+    auditar(db, 'actividad_met', id, profesionalId, { nombre: anterior.nombre }, { nombre: null })
+  })()
 }
 
 export function listar(db: DB, pacienteId: number): ControlResumen[] {
@@ -33,20 +78,24 @@ export function listar(db: DB, pacienteId: number): ControlResumen[] {
 export function evolucion(db: DB, pacienteId: number): EvolucionControl[] {
   return db
     .prepare(
-      `SELECT id, fecha, peso_kg AS pesoKg, talla_cm AS tallaCm, antropometria
+      `SELECT id, fecha, peso_kg AS pesoKg, talla_cm AS tallaCm, antropometria, estado_fisiologico AS estado
        FROM control WHERE paciente_id = ? AND peso_kg IS NOT NULL ORDER BY fecha, id`
     )
     .all(pacienteId)
     .map((c) => ({ ...(c as EvolucionControl), antropometria: { ...medidasVacias(), ...JSON.parse((c as { antropometria: string }).antropometria) } }))
 }
 
+/** Valores de cálculo para el primer control de un paciente. */
+export type Predeterminado = Pick<Configuracion, 'formulaAdulto' | 'formulaMenor' | 'modo' | 'metReposo' | 'eta'>
+
 /**
- * Control nuevo con fecha de hoy. Si hay uno anterior guardado, copia su rutina, sus parámetros, el historial médico y la pauta
+ * Control nuevo con fecha de hoy. Sin control anterior, la fórmula, el modo MET, el MET de reposo y el ETA salen de Configuración.
+ * Si hay uno anterior guardado, copia su rutina, sus parámetros, el historial médico y la pauta
  * para editar solo lo que cambió; la talla se copia solo en adultos (en niños se vuelve a medir). Terminado el crecimiento (21 años en
  * hombres, 19 en mujeres) los diámetros óseos no cambian: se copian de la última medición hecha desde esa edad. El peso siempre se
  * mide de nuevo y el recordatorio de 24 horas parte vacío.
  */
-export function crear(db: DB, pacienteId: number, profesionalId: number): number {
+export function crear(db: DB, pacienteId: number, profesionalId: number, predeterminado: Predeterminado): number {
   const p = db.prepare('SELECT fecha_nacimiento AS f, sexo FROM paciente WHERE id = ?').get(pacienteId) as { f: string; sexo: string } | undefined
   if (!p) throw new Error('Paciente no encontrado')
   const fecha = hoyISO()
@@ -89,13 +138,12 @@ export function crear(db: DB, pacienteId: number, profesionalId: number): number
         pauta: string
       }
     | undefined
-  // ponytail: sin control anterior, MET de reposo 1,3 (sentado tranquilo, 07021) fijo; pasa a Configuración cuando el profesional lo defina.
   const base = anterior ?? {
     tallaCm: null,
-    formulaId: meses >= 19 * 12 ? 'mifflin-st-jeor' : 'fao-oms-unu-schofield',
-    modo: 'estandar',
-    metReposo: 1.3,
-    eta: 0,
+    formulaId: meses >= 19 * 12 ? predeterminado.formulaAdulto : predeterminado.formulaMenor,
+    modo: predeterminado.modo,
+    metReposo: predeterminado.metReposo,
+    eta: predeterminado.eta ? 1 : 0,
     estado: null,
     objetivoCalorico: 'normo',
     ajustePct: 0,

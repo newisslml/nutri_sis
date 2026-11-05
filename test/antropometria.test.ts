@@ -9,6 +9,7 @@ import {
   perfilPhantom,
   PLIEGUES_6,
   PLIEGUES_8,
+  slaughter,
   somatotipo,
   sumaPliegues,
   tallaChumlea,
@@ -106,7 +107,33 @@ test('Durnin-Womersley + Siri', () => {
   const m = resultado(durninWomersley({ ...hombre, sexo: 'F', pesoKg: 60, medidas: { ...medidas, pliegues } }))
   cerca(m.grasaPct, 29.951)
   cerca(m.grasaKg, 17.971)
-  assert.match(resultado(durninWomersley({ ...hombre, edad: 15 })).avisos.join(), /17 a 72 años/)
+  assert.match(resultado(durninWomersley({ ...hombre, edad: 75 })).avisos.join(), /17 a 72 años/)
+  assert.deepEqual(durninWomersley({ ...hombre, edad: 16 }), { faltan: [], noAplica: 'Durnin-Womersley no aplica bajo los 17 años: se usa Slaughter' })
+})
+
+test('Slaughter (tricipital + pantorrilla) en niños y adolescentes', () => {
+  // Σ = 10 + 8 = 18 mm. Hombre: 0,735 × 18 + 1,0 = 14,23 %; mujer: 0,610 × 18 + 5,1 = 16,08 %
+  const nino = { ...hombre, edad: 12, pesoKg: 40 }
+  const h = resultado(slaughter(nino))
+  cerca(h.grasaPct, 14.23)
+  cerca(h.grasaKg, 5.692)
+  cerca(h.masaLibreGrasaKg, 34.308)
+  assert.deepEqual(h.avisos, [])
+  cerca(resultado(slaughter({ ...nino, sexo: 'F' })).grasaPct, 16.08)
+  assert.match(resultado(slaughter({ ...nino, edad: 6 })).avisos.join(), /8 a 18 años/)
+  assert.deepEqual(slaughter({ ...nino, medidas: { ...medidas, pliegues: { tricipital: 10 } } }), { faltan: ['pantorrilla medial (pliegues)'] })
+  // El bicompartimental de un menor de 17 usa Slaughter
+  const bi = resultado(bicompartimental(nino))
+  assert.equal(bi.metodoGrasa, 'Slaughter')
+  cerca(bi.grasa.pct, 14.23)
+  assert.match(bi.avisos.join(), /se estimó en adultos/)
+})
+
+test('en gestación las ecuaciones de pliegues no aplican', () => {
+  const gestante = { ...hombre, sexo: 'F' as const, gestante: true }
+  for (const r of [kerr(gestante), durninWomersley(gestante), slaughter(gestante), bicompartimental(gestante), somatotipo(gestante)]) {
+    assert.ok('noAplica' in r && /gestación/.test(r.noAplica!), JSON.stringify(r))
+  }
 })
 
 // Evaluación 1 de la hoja EVAL de la ficha maestra (hombre de 30 años: la hoja tiene la edad en 0 y no la usa en estas masas)

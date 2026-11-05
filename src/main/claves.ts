@@ -2,9 +2,25 @@
 // - Impresa como clave de recuperación (hex agrupado): abre la base aunque se pierda claves.json.
 // - Guardada en claves.json cifrada con la contraseña (scrypt + AES-256-GCM).
 // Sin contraseña ni clave de recuperación la base no se puede leer, por diseño.
+import Database from 'better-sqlite3-multiple-ciphers'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 
 export type Envoltura = { sal: string; iv: string; tag: string; dato: string }
+
+/** Abre una base SQLCipher v4 con la clave y la lee una vez; si la clave no corresponde lanza SQLITE_NOTADB y la deja cerrada. */
+export function abrirCifrada(ruta: string, clave: Buffer, opciones?: Database.Options): Database.Database {
+  const db = new Database(ruta, opciones)
+  try {
+    db.pragma(`cipher = 'sqlcipher'`)
+    db.pragma('legacy = 4')
+    db.key(clave)
+    db.pragma('user_version')
+    return db
+  } catch (e) {
+    db.close()
+    throw e
+  }
+}
 
 const SCRYPT = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }
 

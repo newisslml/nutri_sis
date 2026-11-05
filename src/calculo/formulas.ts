@@ -79,6 +79,16 @@ export const FORMULAS: FormulaGastoBasal[] = [
     requiere: ['masaLibreGrasaKg'],
     fuente: 'Cunningham JJ. A reanalysis of the factors influencing basal metabolic rate in normal adults. Am J Clin Nutr. 1980;33(11):2372-4.',
     calcular: ({ masaLibreGrasaKg }) => 500 + 22 * masaLibreGrasaKg!
+  },
+  {
+    id: 'katch-mcardle',
+    version: 1,
+    nombre: 'Katch-McArdle',
+    poblacion: { edadMin: 18, descripcion: 'adultos' },
+    requiere: ['masaLibreGrasaKg'],
+    fuente:
+      'McArdle WD, Katch FI, Katch VL. Exercise Physiology: Nutrition, Energy, and Human Performance. Misma ecuación que Cunningham JJ. Am J Clin Nutr. 1991;54(6):963-9.',
+    calcular: ({ masaLibreGrasaKg }) => 370 + 21.6 * masaLibreGrasaKg!
   }
 ]
 
